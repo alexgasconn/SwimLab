@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>SWIMLAB / Personal swim analytics</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-icon">~</span> SWIMLAB<span class="brand-dot">.</span></div>
+    <div class="sidebar-note"><span class="live-dot"></span> LOCAL-FIRST<br><small>Your database stays on this computer.<br>Your API key is never saved.</small></div>
+  </aside>
+  <main>
+    <header>
+      <div><p class="eyebrow">GARMIN CONNECT / PERSONAL ANALYTICS</p><h1>Find your flow.</h1><p class="subtitle">Less guesswork. More insight. Every length counts.</p></div>
+      <span class="badge" id="source">NO DATA</span>
+    </header>
+    <nav class="tabs" role="tablist" aria-label="Dashboard tabs">
+      <button id="overview-tab" role="tab" aria-selected="true" aria-controls="tab-overview" tabindex="0">Overview</button>
+      <button id="performance-tab" role="tab" aria-selected="false" aria-controls="tab-performance" tabindex="-1">Performance</button>
+      <button id="training-tab" role="tab" aria-selected="false" aria-controls="tab-training" tabindex="-1">Training patterns</button>
+      <button id="routes-tab" role="tab" aria-selected="false" aria-controls="tab-routes" tabindex="-1">Open-water routes</button>
+      <button id="records-tab" role="tab" aria-selected="false" aria-controls="tab-records" tabindex="-1">Personal bests</button>
+      <button id="logbook-tab" role="tab" aria-selected="false" aria-controls="tab-logbook" tabindex="-1">Swim logbook</button>
+    </nav>
+    <p id="status" role="status" aria-live="polite">Loading saved data...</p>
+    <section class="filterbar" aria-label="Analytics filters">
+      <label>Timeframe<select id="period"><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option><option value="all" selected>All saved history</option><option value="custom">Custom dates</option></select></label>
+      <label>Environment<select id="environment"><option value="all">Pool + open water</option><option value="pool">Pool only</option><option value="open_water">Open water only</option></select></label>
+      <label id="from-label" hidden>From<input type="date" id="from"></label><label id="to-label" hidden>To<input type="date" id="to"></label>
+      <label class="checkbox"><input type="checkbox" id="outliers"> Include excluded sessions</label>
+      <button id="export" class="secondary" disabled>Export CSV</button>
+    </section>
+    <section id="tab-overview" class="tab-panel" role="tabpanel" aria-labelledby="overview-tab">
+    <details class="connection panel" id="connection" open>
+      <summary>Connect &amp; sync <span>Garmin Personal API</span></summary>
+      <form id="connect">
+        <label for="key">Personal API key</label>
+        <div class="controls"><input id="key" type="password" placeholder="Paste your personal API key" autocomplete="off" required><button id="submit">Sync Garmin + FIT</button><button type="button" id="demo" class="secondary">Explore demo</button><button type="button" id="cached" class="secondary">Load saved data</button></div>
+      </form>
+      <p class="hint">Sync saves activity metrics, pool lengths and available open-water GPS points to a local SQLite database outside OneDrive. No account password, API keys or tokens are stored. Existing FIT files are cached; failed imports retry on the next sync.</p>
+      <progress id="progress" max="1" value="0" hidden aria-label="FIT import progress"></progress>
+    </details>
+    <p id="coverage" class="hint">No activities loaded.</p>
+    <section class="cards" aria-label="Training summary">
+      <article><span>Total distance</span><strong id="distance">--</strong><small id="distance-note">kilometres</small></article>
+      <article><span>Moving time</span><strong id="duration">--</strong><small id="moving-note">actual time swimming</small></article>
+      <article><span>Moving pace</span><strong id="pace">--</strong><small>min:sec / 100 m, distance-weighted</small></article>
+      <article><span>Sessions</span><strong id="count">--</strong><small id="count-note">in this view</small></article>
+    </section>
+    </section>
+    <section id="tab-performance" class="tab-panel" role="tabpanel" aria-labelledby="performance-tab" hidden>
+      <div id="performance">
+      <div class="section-heading"><div><p class="eyebrow">01 / PERFORMANCE</p><h2>The shape of your swimming</h2></div><span class="legend"><i class="teal"></i>Pool <i class="violet"></i>Open water</span></div>
+      <div class="chart-grid">
+        <article class="panel"><div class="panel-heading"><h3>Pace vs distance</h3><span>SESSION SCATTER</span></div><p class="chart-note">Each dot is a session. Lower pace = faster swimming.</p><div id="scatter" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Weekly volume</h3><span>CONSISTENCY</span></div><p class="chart-note"><i class="legend-line"></i>Trailing 4-week mean, including zero weeks. Monday-Sunday weeks intersecting your range; current week is incomplete.</p><div id="weekly" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Distance distribution</h3><span>SESSION SIZE</span></div><div id="distance-hist" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Pace distribution</h3><span>SWIMMING SPEED</span></div><div id="pace-hist" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>SWOLF over time</h3><span>SESSION AVERAGE</span></div><p class="chart-note">Lower can be more efficient, but compare similar pool lengths and session types.</p><div id="swolf-chart" class="chart"></div></article>
+      </div>
+      </div>
+    </section>
+    <section id="tab-training" class="tab-panel" role="tabpanel" aria-labelledby="training-tab" hidden>
+      <div id="patterns">
+      <div class="section-heading"><div><p class="eyebrow">02 / TRAINING PATTERNS</p><h2>When you show up</h2></div></div>
+      <article class="panel"><div class="panel-heading"><h3>Weekday x hour</h3><span>LOCAL SESSION START TIME</span></div><p class="chart-note">One count per session start, not time spent swimming. Brighter cells = more sessions.</p><div id="heatmap" class="heatmap"></div></article>
+      <div class="section-heading"><div><p class="eyebrow">POOL / OPEN WATER</p><h2>Training by environment</h2></div></div>
+      <div id="environment-summary" class="summary-grid"></div>
+      </div>
+    </section>
+    <section id="tab-routes" class="tab-panel" role="tabpanel" aria-labelledby="routes-tab" hidden>
+      <div class="section-heading"><div><p class="eyebrow">04 / OPEN WATER</p><h2>Your routes</h2></div><span class="badge">LOCAL GPS ONLY</span></div>
+      <p class="hint">Routes come from GPS points already present in FIT files and stay in the local database. This relative route map uses no external map tiles or location services. Garmin FIT exports without GPS points cannot be drawn.</p>
+      <article class="panel route-panel"><div id="route-map" class="route-map"></div></article>
+    </section>
+    <section id="tab-records" class="tab-panel" role="tabpanel" aria-labelledby="records-tab" hidden>
+      <div class="section-heading"><div><p class="eyebrow">05 / PERSONAL BESTS</p><h2>Your podium, not predictions</h2></div>
+        <div class="record-controls"><label>Top<select id="record-limit"><option value="3">3</option><option value="5">5</option><option value="10">10</option></select></label>
+          <label>Rank by<select id="ranking-metric"><option value="distance">Longest distance</option><option value="pace">Fastest pace</option><option value="swolf">Lowest SWOLF</option></select></label></div>
+      </div>
+      <p class="hint">Pool efforts use exact-distance windows of recorded FIT lengths, including rests between lengths. One best effort per session. IM requires equal butterfly / backstroke / breaststroke / freestyle legs in that order. These are locally calculated efforts, not Garmin's official personal records. Fastest session requires at least 100 m.</p>
+      <article class="panel ranking-panel"><div class="panel-heading"><h3 id="ranking-title">Longest distance</h3><span id="ranking-count">TOP 3</span></div><div id="ranking-list"></div></article>
+      <div id="record-cards" class="record-grid"></div>
+    </section>
+    <section id="tab-logbook" class="tab-panel" role="tabpanel" aria-labelledby="logbook-tab" hidden>
+      <div class="section-heading"><div><p class="eyebrow">04 / SWIM LOGBOOK</p><h2>Every metric. One place.</h2></div><span id="table-count" class="badge">0 SESSIONS</span></div>
+      <p class="hint">SPM = strokes / moving minutes. SPL = strokes / active lengths. DPS = metres / stroke. TPL = moving seconds / length. LPM = active lengths / moving minutes. Stroke mix is % of recorded active-length distance; drills, mixed and unknown remain Other. Missing metrics are shown as --, never zero-filled.</p>
+      <div class="panel table-panel"><div class="table-wrap" tabindex="0" aria-label="Scrollable swim metrics"><table><thead id="table-head"></thead><tbody id="sessions"></tbody></table></div></div>
+      <details class="panel review-panel"><summary>Data quality &amp; exclusions <span id="quality-count"></span></summary><p class="hint">Conservative physical limits and robust pace deviations flag sessions, not delete them. Unusual does not mean wrong: technique drills and long rests may be legitimate. Include / exclude decisions are saved locally. Invalid FIT lengths never qualify for records.</p><div id="quality"></div></details>
+      <details class="panel review-panel"><summary>Import coverage &amp; warnings <span id="import-count"></span></summary><div id="import-warnings" class="hint"></div></details>
+    </section>
+    <footer>SWIMLAB / Independent personal dashboard, not affiliated with Garmin. Local, unencrypted health and optional GPS route data: protect this computer and its backups. Never expose this server to the Internet.</footer>
+  </main>
+</body>
+</html>
