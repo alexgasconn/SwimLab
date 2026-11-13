@@ -53,20 +53,30 @@ export async function connectGarmin(key, fetcher = fetch) {
   const accessToken = typeof token === 'string' ? token : token?.access_token ?? token?.accessToken;
   if (typeof accessToken !== 'string' || !accessToken || /[\r\n]/.test(accessToken)) throw new Error('Garmin returned an unrecognized token response.');
   const authorization = `Bearer ${accessToken}`;
+  async function historyPage(page) {
+    const r = await request(`/activitylist-service/activities/search/activities?start=${page * 100}&limit=100`, authorization, fetcher);
+    const batch = await r.json();
+    if (!Array.isArray(batch) || batch.some(a => !a || typeof a !== 'object')) throw new Error('Garmin returned an unrecognized activity list.');
+    const owners = [...new Set(batch.map(a => a.ownerId).filter(id => id != null).map(String))];
+    if (owners.length > 1) throw new Error('The history contains multiple accounts; sync cancelled.');
+    return { activities: normalizeActivities(batch), owner: owners[0] ?? null, scanned: batch.length };
+  }
   return {
+    historyPage,
     async history() {
       const activities = [];
+      const owners = new Set();
+      let scanned = 0;
       let truncated = true;
       for (let page = 0; page < 50; page++) {
-        const r = await request(`/activitylist-service/activities/search/activities?start=${page * 100}&limit=100`, authorization, fetcher);
-        const batch = await r.json();
-        if (!Array.isArray(batch) || batch.some(a => !a || typeof a !== 'object')) throw new Error('Garmin returned an unrecognized activity list.');
-        activities.push(...batch);
-        if (batch.length < 100) { truncated = false; break; }
+        const batch = await historyPage(page);
+        activities.push(...batch.activities);
+        scanned += batch.scanned;
+        if (batch.owner) owners.add(batch.owner);
+        if (batch.scanned < 100) { truncated = false; break; }
       }
-      const owners = [...new Set(activities.map(a => a.ownerId).filter(id => id != null).map(String))];
-      if (owners.length > 1) throw new Error('The history contains multiple accounts; sync cancelled.');
-      return { activities: normalizeActivities(activities), owner: owners[0] ?? null, scanned: activities.length, truncated };
+      if (owners.size > 1) throw new Error('The history contains multiple accounts; sync cancelled.');
+      return { activities, owner: [...owners][0] ?? null, scanned, truncated };
     },
     async fit(id) {
       const r = await request(`/download-service/files/activity/${encodeURIComponent(id)}`, authorization, fetcher, 'GET', true);

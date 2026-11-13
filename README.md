@@ -32,10 +32,19 @@ SQLite is experimental in Node 22 and may print a warning.
 - Pool / open-water, date-range and excluded-session filters affect the dashboard.
 - Configurable top 3/5/10 rankings by distance, pace or SWOLF. Exact-length
   50/100/200/400 m efforts by stroke, 100/200/1000 m efforts, 100/200/400 m IM
-  efforts, and longest / fastest sessions use the current filtered view.
+  efforts, and longest / fastest sessions use the current filtered view. Use
+  the stroke selector to explore each group independently.
+- Overall stroke mix is weighted by recorded active pool-length distance in the
+  filtered view. Drills, mixed and unknown lengths remain in the denominator,
+  even though they are not displayed as a separate stroke. Sessions without
+  recorded lengths and open-water sessions do not contribute; coverage is shown.
 - Locally rendered open-water GPS routes when Garmin FIT files contain position
-  records. The relative route view loads no external map tiles or location services.
-- Full metric logbook, reversible per-session review, import warnings and CSV export.
+  records. All routes in the current view are drawn together with start/finish
+  markers on the approximate offline Natural Earth coastline map. It has no streets or local
+  detail, is not suitable for navigation and loads no external map tiles.
+- Full metric logbook with sortable columns and distance / pool-length filters.
+  These filters also apply to CSV export, but not the other dashboard views.
+  Reversible per-session review and import warnings remain available.
 - Demo data is explicitly synthetic and never written to SQLite.
 
 ## Metric definitions
@@ -52,8 +61,8 @@ In particular, LPM is *not* cadence or strokes per minute.
 
 The list API's pool length is in centimetres; decoded FIT pool length is in metres.
 FIT lengths supply distance-weighted freestyle, breaststroke, backstroke and butterfly
-percentages. Drills, mixed and unknown strokes remain **Other**: known styles are
-not inflated to 100%. Open-water percentages and pool-only metrics normally stay
+percentages. Drills, mixed and unknown strokes remain in the denominator, so known
+styles are not inflated to 100%. Open-water percentages and pool-only metrics normally stay
 unavailable. Temperature is the recorded session average when present, not an
 invented mean of minimum and maximum. Missing values are `NULL` / `--`.
 
@@ -68,6 +77,8 @@ legs, in that order. Drills, mixed/unknown strokes, overlapping timestamps and
 implausible length times cannot qualify. Each session contributes at most one
 best effort per category, so overlapping windows cannot fill a podium.
 Fastest session uses moving pace and a minimum 100 m session distance.
+Record cards show the pace per 100 m for the recorded effort, including rests;
+session records and rankings show the session's moving pace when available.
 When lengths are unavailable, the dashboard says so instead of displaying a fake record.
 
 ## Data quality

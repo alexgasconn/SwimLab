@@ -1,12 +1,16 @@
-import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, trainingHeatmap, personalBests, sessionRankings, trainingSummary } from './analytics.mjs';
+import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, trainingHeatmap, personalBests, sessionRankings, trainingSummary, strokeMix, sortSessions, filterLogbook } from './analytics.mjs';
 import { scatterplot, distribution, weeklyChart, heatmap, paceLabel, swolfChart, routeMap } from './charts.js';
 
 const $ = id => document.getElementById(id);
+const cloud = document.documentElement.dataset.storage === 'cloud';
 let dataset = { activities: [], lengths: [], routePoints: [], history: null };
 let demo = false;
 let running = false;
 let visible = [];
+let logbookRows = [];
 let currentPoll = null;
+let tableSort = null;
+let recordGroup = 'freestyle';
 const format = (value, digits = 1) => value == null || !Number.isFinite(value) ? '--' : new Intl.NumberFormat('en', { maximumFractionDigits: digits }).format(value);
 const percent = value => value == null ? '--' : `${format(value, 1)}%`;
 const time = value => {
@@ -29,18 +33,29 @@ const columns = [
   ['Temp (C)', a => format(a.temperature)], ['Min temp (C)', a => format(a.minTemperature)],
   ['Max temp (C)', a => format(a.maxTemperature)],
   ['Free %', a => percent(a.freestylePct)], ['Breast %', a => percent(a.breaststrokePct)],
-  ['Back %', a => percent(a.backstrokePct)], ['Fly %', a => percent(a.butterflyPct)], ['Other %', a => percent(a.otherPct)],
+  ['Back %', a => percent(a.backstrokePct)], ['Fly %', a => percent(a.butterflyPct)],
   ['FIT', a => a.fitStatus ?? 'pending'], ['Excluded', a => a.excluded ? 'Yes' : 'No'],
   ['Quality flags', a => a.reasons.join('; ')], ['Review', a => a.review ?? 'Automatic'],
 ];
+const sortFields = [
+  a => a.id, a => localDate(a.date).getTime(), a => a.name, a => (localDate(a.date).getDay() + 6) % 7,
+  a => a.type, a => a.poolLength, a => a.distance, a => a.movingTime, a => a.elapsedTime, a => a.timerTime,
+  a => a.movingRatio, a => a.pace, a => a.heartRate, a => a.lengths, a => a.strokes,
+  a => a.spm, a => a.spl, a => a.dps, a => a.tpl, a => a.lpm, a => a.swolf,
+  a => a.temperature, a => a.minTemperature, a => a.maxTemperature,
+  a => a.freestylePct, a => a.breaststrokePct, a => a.backstrokePct, a => a.butterflyPct,
+  a => a.fitStatus ?? 'pending', a => a.excluded ? 'Yes' : 'No', a => a.reasons.join('; '), a => a.review ?? 'Automatic',
+];
+const strokeLabels = { freestyle: 'Freestyle', breaststroke: 'Breaststroke', backstroke: 'Backstroke', butterfly: 'Butterfly' };
 function status(message, error = false) {
   $('status').textContent = message;
   $('status').className = error ? 'error' : '';
 }
 async function api(path, body) {
-  const response = await fetch(path, body === undefined ? { signal: AbortSignal.timeout(20000) } : {
+  const timeout = cloud ? 110000 : 20000;
+  const response = await fetch(path, body === undefined ? { signal: AbortSignal.timeout(timeout) } : {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body), signal: AbortSignal.timeout(20000),
+    body: JSON.stringify(body), signal: AbortSignal.timeout(timeout),
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error ?? `Request failed (HTTP ${response.status}).`);
@@ -83,7 +98,7 @@ function render() {
   const totalDistance = distanceRows.reduce((s, a) => s + a.distance, 0);
   const moving = visible.reduce((s, a) => s + (a.movingTime ?? 0), 0);
   const elapsed = visible.reduce((s, a) => s + (a.elapsedTime ?? 0), 0);
-  $('source').textContent = demo ? 'DEMO / SYNTHETIC DATA' : dataset.activities.length ? 'LOCAL SQLITE / GARMIN' : 'NO DATA';
+  $('source').textContent = demo ? 'DEMO / SYNTHETIC DATA' : dataset.activities.length ? cloud ? 'CLOUD POSTGRES / GARMIN' : 'LOCAL SQLITE / GARMIN' : 'NO DATA';
   $('source').className = `badge${demo ? ' demo' : ''}`;
   $('distance').textContent = format(totalDistance / 1000, 2);
   const pool = visible.filter(a => a.type === 'pool').reduce((s, a) => s + (a.distance ?? 0), 0);
@@ -95,8 +110,8 @@ function render() {
   $('count-note').textContent = `${dated.filter(a => a.excluded).length} flagged or manually excluded${include ? ' (included in this view)' : ' hidden'}`;
   const complete = dataset.activities.filter(a => a.fitStatus === 'complete').length;
   const history = dataset.history;
-  $('coverage').textContent = demo ? 'Synthetic demo only. No demo data is written to SQLite.'
-    : `${dataset.activities.length} saved swims / ${complete} FIT imports / ${dataset.lengths.filter(l => l.active).length} active pool lengths. ${history ? `Last history sync: ${new Date(history.syncedAt).toLocaleString('en')}. ${history.truncated ? 'Scan capped at 5,000 activities; older history may be missing.' : `${history.scanned} activities scanned across all sports.`}` : 'Connect Garmin to build your local database.'}`;
+  $('coverage').textContent = demo ? 'Synthetic demo only. No demo data is written to storage.'
+    : `${dataset.activities.length} saved swims / ${complete} FIT imports / ${dataset.lengths.filter(l => l.active).length} active pool lengths. ${history ? `Last history sync: ${new Date(history.syncedAt).toLocaleString('en')}. ${history.truncated ? 'Scan capped at 5,000 activities; older history may be missing.' : `${history.scanned} activities scanned across all sports.`}` : 'Connect Garmin to build your database.'}`;
   scatterplot($('scatter'), visible);
   distribution($('distance-hist'), visible.map(a => a.distance == null ? null : a.distance / 1000), false);
   distribution($('pace-hist'), visible.map(a => a.pace), true);
@@ -112,7 +127,8 @@ function render() {
   heatmap($('heatmap'), trainingHeatmap(visible));
   swolfChart($('swolf-chart'), visible);
   renderSummary(trainingSummary(visible));
-  routeMap($('route-map'), visible, dataset.routePoints ?? []);
+  renderStrokeMix(strokeMix(visible, dataset.lengths));
+  renderRoutes();
   const limit = Number($('record-limit').value);
   const metric = $('ranking-metric').value;
   const metricLabel = metric === 'distance' ? 'Longest distance' : metric === 'pace' ? 'Fastest pace' : 'Lowest SWOLF';
@@ -120,10 +136,47 @@ function render() {
   $('ranking-count').textContent = `TOP ${limit}`;
   renderRankings(sessionRankings(visible, metric, limit), metric);
   renderRecords(personalBests(visible, dataset.lengths, limit));
-  renderTable();
+  renderPoolOptions();
+  applyLogbookFilters();
   renderQuality(dated);
   renderWarnings();
-  $('export').disabled = visible.length === 0;
+}
+function renderStrokeMix(mix) {
+  $('stroke-coverage').textContent = mix.total
+    ? `${format(mix.total / 1000, 2)} km of recorded active lengths across ${mix.sessions} of ${mix.poolSessions} pool sessions. Unclassified lengths remain in the denominator; open water and sessions without lengths are not included.`
+    : 'No recorded pool lengths in this view. Open water and sessions without lengths are not included.';
+  const known = mix.strokes.filter(item => Object.hasOwn(strokeLabels, item.stroke));
+  $('stroke-bar').replaceChildren();
+  $('stroke-bar').setAttribute('aria-label', mix.total ? known.map(item => `${strokeLabels[item.stroke]} ${percent(item.percentage)}`).join(', ') : 'No stroke data available');
+  $('stroke-mix').replaceChildren();
+  for (const item of known) {
+    if (item.percentage > 0) {
+      const segment = document.createElement('span');
+      segment.className = `stroke-segment stroke-${item.stroke}`;
+      segment.style.width = `${item.percentage}%`;
+      $('stroke-bar').append(segment);
+    }
+    const card = document.createElement('div');
+    card.className = `stroke-item stroke-${item.stroke}`;
+    const title = document.createElement('span');
+    title.textContent = strokeLabels[item.stroke];
+    const value = document.createElement('strong');
+    value.textContent = percent(item.percentage);
+    const distance = document.createElement('small');
+    distance.textContent = mix.total ? `${format(item.distance, 0)} m` : '--';
+    card.append(title, value, distance);
+    $('stroke-mix').append(card);
+  }
+}
+function renderRoutes() {
+  const counts = new Map();
+  for (const point of dataset.routePoints ?? []) {
+    if (Number.isFinite(point.lat) && Number.isFinite(point.lon)) counts.set(point.activityId, (counts.get(point.activityId) ?? 0) + 1);
+  }
+  const routes = visible.filter(a => a.type === 'open_water' && counts.get(a.id) >= 2)
+    .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')));
+  $('route-count').textContent = `${routes.length} recorded routes in this view. Hover or focus a route for session details.`;
+  routeMap($('route-map'), routes, dataset.routePoints ?? []);
 }
 function renderSummary(summary) {
   const container = $('environment-summary');
@@ -167,9 +220,9 @@ function renderRankings(entries, metric) {
     rank.textContent = String(index + 1).padStart(2, '0');
     const details = document.createElement('div');
     details.textContent = `${entry.date?.slice(0, 10)} / ${entry.type === 'pool' ? 'Pool' : 'Open water'}`;
-    const name = document.createElement('small');
-    name.textContent = entry.name;
-    details.append(name);
+    const pace = document.createElement('small');
+    pace.textContent = `${paceLabel(entry.pace)} /100 m`;
+    details.append(pace);
     const value = document.createElement('strong');
     value.textContent = metric === 'distance' ? `${format(entry.value / 1000, 2)} km`
       : metric === 'pace' ? `${paceLabel(entry.value)}/100` : format(entry.value, 1);
@@ -179,11 +232,20 @@ function renderRankings(entries, metric) {
 }
 function renderRecords(records) {
   $('record-cards').replaceChildren();
-  for (const [category, entries] of Object.entries(records)) {
+  const groups = {
+    freestyle: key => key.endsWith(' freestyle'),
+    breaststroke: key => key.endsWith(' breaststroke'),
+    backstroke: key => key.endsWith(' backstroke'),
+    butterfly: key => key.endsWith(' butterfly'),
+    im: key => key.endsWith(' IM'),
+    mixed: key => /^\d+m$/.test(key),
+    session: key => key.endsWith(' session'),
+  };
+  for (const [category, entries] of Object.entries(records).filter(([key]) => groups[recordGroup](key))) {
     const card = document.createElement('article');
     card.className = 'record-card';
     const heading = document.createElement('h3');
-    heading.textContent = category;
+    heading.textContent = category.replace(/ (freestyle|breaststroke|backstroke|butterfly)$/, '');
     card.append(heading);
     if (!entries.length) {
       const empty = document.createElement('p');
@@ -199,9 +261,9 @@ function renderRecords(records) {
       rank.textContent = String(index + 1).padStart(2, '0');
       const details = document.createElement('div');
       details.textContent = entry.date?.slice(0, 10);
-      const name = document.createElement('small');
-      name.textContent = entry.name;
-      details.append(name);
+      const pace = document.createElement('small');
+      pace.textContent = `${paceLabel(entry.pace)} /100 m`;
+      details.append(pace);
       const value = document.createElement('strong');
       value.textContent = category === 'Longest session' ? `${format(entry.value / 1000, 2)} km`
         : category === 'Fastest session' ? `${paceLabel(entry.value)}/100` : paceLabel(entry.value);
@@ -212,17 +274,28 @@ function renderRecords(records) {
   }
 }
 function renderTable() {
-  $('table-count').textContent = `${visible.length} SESSIONS`;
+  $('table-count').textContent = `${logbookRows.length} SESSIONS`;
   const header = document.createElement('tr');
-  for (const [title] of columns) {
+  for (const [[title], index] of columns.map((column, index) => [column, index])) {
     const th = document.createElement('th');
     th.scope = 'col';
-    th.textContent = title;
+    if (tableSort?.index === index) th.setAttribute('aria-sort', tableSort.direction);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sort-button';
+    button.textContent = `${title}${tableSort?.index === index ? tableSort.direction === 'ascending' ? ' ↑' : ' ↓' : ' ↕'}`;
+    button.setAttribute('aria-label', `Sort by ${title}`);
+    button.addEventListener('click', () => {
+      tableSort = { index, direction: tableSort?.index === index && tableSort.direction === 'ascending' ? 'descending' : 'ascending' };
+      renderTable();
+      $('table-head').querySelectorAll('button')[index].focus();
+    });
+    th.append(button);
     header.append(th);
   }
   $('table-head').replaceChildren(header);
   const fragment = document.createDocumentFragment();
-  for (const a of visible) {
+  for (const a of sortedVisible()) {
     const row = document.createElement('tr');
     if (a.excluded) row.className = 'excluded';
     for (const [, get] of columns) {
@@ -232,7 +305,7 @@ function renderTable() {
     }
     fragment.append(row);
   }
-  if (!visible.length) {
+  if (!logbookRows.length) {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
     cell.colSpan = columns.length;
@@ -241,6 +314,36 @@ function renderTable() {
     fragment.append(row);
   }
   $('sessions').replaceChildren(fragment);
+}
+function sortedVisible() {
+  return tableSort ? sortSessions(logbookRows, sortFields[tableSort.index], tableSort.direction) : logbookRows;
+}
+function renderPoolOptions() {
+  const select = $('pool-filter');
+  const selected = select.value;
+  const lengths = [...new Set(dataset.activities.filter(a => a.type === 'pool' && a.poolLength > 0).map(a => a.poolLength))].sort((a, b) => a - b);
+  select.replaceChildren();
+  for (const [value, label] of [['all', 'All environments'], ['open_water', 'Open water'], ['unknown', 'Pool length unknown'],
+    ...lengths.map(length => [String(length), `${format(length, 2)} m pool`])]) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    select.append(option);
+  }
+  select.value = [...select.options].some(option => option.value === selected) ? selected : 'all';
+}
+function applyLogbookFilters() {
+  const minInput = $('distance-min'), maxInput = $('distance-max');
+  const minDistance = minInput.value === '' ? null : minInput.valueAsNumber;
+  const maxDistance = maxInput.value === '' ? null : maxInput.valueAsNumber;
+  const invalid = minInput.validity.badInput || maxInput.validity.badInput
+    || minDistance != null && (!Number.isFinite(minDistance) || minDistance < 0)
+    || maxDistance != null && (!Number.isFinite(maxDistance) || maxDistance < 0)
+    || minDistance != null && maxDistance != null && minDistance > maxDistance;
+  $('logbook-filter-error').textContent = invalid ? 'Enter valid non-negative distances; the minimum cannot exceed the maximum.' : '';
+  logbookRows = invalid ? [] : filterLogbook(visible, { minDistance, maxDistance, pool: $('pool-filter').value });
+  $('export').disabled = invalid || logbookRows.length === 0;
+  renderTable();
 }
 function renderQuality(activities) {
   $('quality').replaceChildren();
@@ -293,10 +396,10 @@ function appendReview(a, parent) {
         dataset.activities.find(activity => activity.id === a.id).review = select.value || null;
       } else {
         await api('/api/review', { id: a.id, decision: select.value || null });
-        dataset = await api('/api/data');
+        dataset = await fetchDataset();
       }
       render();
-      status(demo ? 'Demo review updated in memory only.' : 'Review saved to SQLite.');
+      status(demo ? 'Demo review updated in memory only.' : `Review saved to ${cloud ? 'PostgreSQL' : 'SQLite'}.`);
     } catch (error) {
       select.value = a.review ?? '';
       select.disabled = false;
@@ -361,14 +464,42 @@ for (const id of ['period', 'environment', 'outliers', 'from', 'to', 'record-lim
     safeRender();
   });
 }
+for (const id of ['distance-min', 'distance-max']) $(id).addEventListener('input', applyLogbookFilters);
+$('pool-filter').addEventListener('change', applyLogbookFilters);
+$('clear-logbook').addEventListener('click', () => {
+  $('distance-min').value = '';
+  $('distance-max').value = '';
+  $('pool-filter').value = 'all';
+  applyLogbookFilters();
+});
+for (const button of $('record-groups').querySelectorAll('button')) {
+  button.addEventListener('click', () => {
+    recordGroup = button.dataset.recordGroup;
+    for (const option of $('record-groups').querySelectorAll('button')) {
+      option.setAttribute('aria-pressed', String(option === button));
+    }
+    renderRecords(personalBests(visible, dataset.lengths, Number($('record-limit').value)));
+  });
+}
 async function loadSaved() {
-  dataset = await api('/api/data');
+  dataset = await fetchDataset();
   demo = false;
   render();
 }
+async function fetchDataset() {
+  const data = await api('/api/data');
+  while (cloud && data.nextOffset != null) {
+    const page = await api(`/api/data?offset=${data.nextOffset}`);
+    data.activities.push(...page.activities);
+    data.lengths.push(...page.lengths);
+    data.routePoints.push(...page.routePoints);
+    data.nextOffset = page.nextOffset;
+  }
+  return data;
+}
 async function pollSync() {
   try {
-    const job = await api('/api/sync');
+    const job = cloud ? await api('/api/sync', { action: 'step' }) : await api('/api/sync');
     setRunning(job.state === 'running');
     $('progress').max = Math.max(1, job.total);
     $('progress').value = job.done;
@@ -382,24 +513,24 @@ async function pollSync() {
     }
   } catch (error) {
     setRunning(false);
-    status(`Cannot check sync progress: ${error.message} Reload to reconnect; the server may still be syncing.`, true);
+    status(`Cannot check sync progress: ${error.message} Reload to reconnect or retry.`, true);
   }
 }
 $('connect').addEventListener('submit', async event => {
   event.preventDefault();
   if (running) return;
-  const apiKey = $('key').value.trim();
+  const apiKey = cloud ? null : $('key').value.trim();
   $('key').value = '';
   setRunning(true);
   status('Connecting to Garmin...');
   try {
-    await api('/api/sync', { apiKey });
+    await api('/api/sync', cloud ? { action: 'start' } : { apiKey });
     if (currentPoll) clearTimeout(currentPoll);
     await pollSync();
   } catch (error) { setRunning(false); status(error.message, true); }
 });
 $('cached').addEventListener('click', async () => {
-  try { await loadSaved(); status('Loaded locally saved metrics. No Garmin request was made.'); }
+  try { await loadSaved(); status(`Loaded ${cloud ? 'cloud' : 'locally'} saved metrics. No Garmin request was made.`); }
   catch (error) { status(error.message, true); }
 });
 $('export').addEventListener('click', () => {
@@ -408,7 +539,7 @@ $('export').addEventListener('click', () => {
     if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
     return `"${text.replaceAll('"', '""')}"`;
   };
-  const csv = [columns.map(([title]) => title), ...visible.map(a => columns.map(([, get]) => get(a)))].map(row => row.map(escape).join(',')).join('\r\n');
+  const csv = [columns.map(([title]) => title), ...sortedVisible().map(a => columns.map(([, get]) => get(a)))].map(row => row.map(escape).join(',')).join('\r\n');
   const url = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' }));
   const link = document.createElement('a');
   link.href = url;
@@ -464,9 +595,18 @@ $('demo').addEventListener('click', () => {
   $('from-label').hidden = true;
   $('to-label').hidden = true;
   render();
-  status('Demo loaded: synthetic data only. SQLite has not been changed.');
+  status('Demo loaded: synthetic data only. Storage has not been changed.');
 });
 
+if (cloud) {
+  $('key-label').hidden = true;
+  $('key').hidden = true;
+  $('key').required = false;
+  $('storage-label').textContent = 'CLOUD / PRIVATE';
+  $('storage-note').textContent = 'Data is stored in PostgreSQL. Your Garmin key stays on the server.';
+  $('connection-note').textContent = 'The Garmin key is configured as a server environment variable. Swim metrics, pool lengths and available GPS routes are stored in PostgreSQL. Keep Vercel Deployment Protection enabled for all deployments.';
+  $('privacy-note').textContent = 'SWIMLAB / Independent personal dashboard, not affiliated with Garmin. Cloud storage contains sensitive health and GPS data. Protect all deployments and database access.';
+}
 try {
   await loadSaved();
   const job = await api('/api/sync');

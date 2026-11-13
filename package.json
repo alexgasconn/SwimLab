@@ -6,9 +6,17 @@
     "start": "node server.mjs",
     "test": "node --test"
   },
-  "engines": { "node": ">=22.16" },
+  "engines": {
+    "node": ">=22.16"
+  },
   "dependencies": {
     "@garmin/fitsdk": "^21.0.0",
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "pg": "^8.16.3",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16"
   }
 }

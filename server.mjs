@@ -93,6 +93,10 @@ export function createApp(fetcher = fetch, store = openStore()) {
         '/charts.js': ['charts.js', 'text/javascript'],
         '/analytics.mjs': ['analytics.mjs', 'text/javascript'],
         '/style.css': ['style.css', 'text/css'],
+        '/land-10m.json': ['node_modules/world-atlas/land-10m.json', 'application/json'],
+        '/topojson-client.js': ['node_modules/topojson-client/dist/topojson-client.min.js', 'text/javascript'],
+        '/world-atlas-license.txt': ['node_modules/world-atlas/LICENSE', 'text/plain'],
+        '/topojson-license.txt': ['node_modules/topojson-client/LICENSE', 'text/plain'],
       };
       const file = files[req.url];
       if (req.method !== 'GET' || !file) { json(404, { error: 'Route not found.' }); return; }

@@ -147,6 +147,36 @@ test('open-water GPS routes are stored locally, reused, and invalidated with cha
   } finally { store.close(); }
 });
 
+test('local server serves the offline map and its decoder without an external tile service', async () => {
+  const server = createApp(fetch, openStore(':memory:'));
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const get = path => new Promise((resolve, reject) => {
+    const req = request(`${base}${path}`, { headers: { Host: '127.0.0.1:8787' } }, res => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { text += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, contentType: res.headers['content-type'], text }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  try {
+    const map = await get('/land-10m.json');
+    assert.equal(map.status, 200);
+    assert.match(map.contentType, /application\/json/);
+    assert.equal(JSON.parse(map.text).type, 'Topology');
+    const decoder = await get('/topojson-client.js');
+    assert.equal(decoder.status, 200);
+    assert.match(decoder.contentType, /text\/javascript/);
+    assert.match((await get('/world-atlas-license.txt')).text, /Permission to use/);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
 test('HTTP rejects cross-origin writes, persists async sync, and reports FIT failure without false success', async () => {
   const store = openStore(':memory:');
   const fetcher = async (url, options) => {

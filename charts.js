@@ -3,6 +3,7 @@ import { histogram, localDate, swolfTrend } from './analytics.mjs';
 const ns = 'http://www.w3.org/2000/svg';
 const colors = { pool: '#54dbcb', open_water: '#9eafff', weekly: '#327e91', rolling: '#f5bc72' };
 const W = 640, H = 260;
+let landPromise;
 const margin = { left: 55, right: 18, top: 20, bottom: 45 };
 const plotW = W - margin.left - margin.right, plotH = H - margin.top - margin.bottom;
 export const paceLabel = value => {
@@ -125,6 +126,44 @@ export function swolfChart(container, activities) {
   }
 }
 
+function loadLand() {
+  if (!landPromise) {
+    landPromise = fetch('/land-10m.json').then(response => {
+      if (!response.ok) throw new Error(`Offline map HTTP ${response.status}`);
+      return response.json();
+    }).then(topology => {
+      if (!globalThis.topojson) throw new Error('Offline map decoder is unavailable.');
+      return globalThis.topojson.feature(topology, topology.objects.land).features[0].geometry.coordinates;
+    }).catch(error => {
+      landPromise = null;
+      throw error;
+    });
+  }
+  return landPromise;
+}
+
+function clipRing(points, width, height) {
+  let result = points;
+  for (const [axis, limit, keepAbove] of [[0, 0, true], [0, width, false], [1, 0, true], [1, height, false]]) {
+    if (!result.length) break;
+    const clipped = [];
+    let previous = result.at(-1);
+    let previousInside = keepAbove ? previous[axis] >= limit : previous[axis] <= limit;
+    for (const current of result) {
+      const currentInside = keepAbove ? current[axis] >= limit : current[axis] <= limit;
+      if (currentInside !== previousInside) {
+        const ratio = (limit - previous[axis]) / (current[axis] - previous[axis]);
+        clipped.push([previous[0] + ratio * (current[0] - previous[0]), previous[1] + ratio * (current[1] - previous[1])]);
+      }
+      if (currentInside) clipped.push(current);
+      previous = current;
+      previousInside = currentInside;
+    }
+    result = clipped;
+  }
+  return result;
+}
+
 export function routeMap(container, activities, routePoints) {
   const activityById = new Map(activities.filter(a => a.type === 'open_water').map(a => [a.id, a]));
   const byId = new Map();
@@ -136,36 +175,75 @@ export function routeMap(container, activities, routePoints) {
   const routes = [...byId.entries()].map(([id, points]) => ({
     activity: activityById.get(id), points: points.sort((a, b) => a.sequence - b.sequence),
   })).filter(route => route.points.length > 1);
-  const svg = chart(container, 'Locally stored open-water GPS routes. No external map tiles are loaded.', !routes.length);
+  const svg = chart(container, 'Open-water GPS routes on an approximate offline Natural Earth map.', !routes.length);
   if (!svg) return;
   const W = 800, H = 420, pad = 32;
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   const all = routes.flatMap(route => route.points);
   const latitude = all.reduce((sum, point) => sum + point.lat, 0) / all.length;
-  const projected = all.map(point => ({ x: point.lon * Math.cos(latitude * Math.PI / 180), y: point.lat }));
-  let minX = Math.min(...projected.map(point => point.x)), maxX = Math.max(...projected.map(point => point.x));
-  let minY = Math.min(...projected.map(point => point.y)), maxY = Math.max(...projected.map(point => point.y));
+  const origin = all[0].lon;
+  const longitude = lon => ((lon - origin + 540) % 360 - 180) * Math.max(0.001, Math.cos(latitude * Math.PI / 180));
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const point of all) {
+    const px = longitude(point.lon);
+    minX = Math.min(minX, px); maxX = Math.max(maxX, px);
+    minY = Math.min(minY, point.lat); maxY = Math.max(maxY, point.lat);
+  }
   if (maxX === minX) { minX -= 0.0001; maxX += 0.0001; }
   if (maxY === minY) { minY -= 0.0001; maxY += 0.0001; }
   const scale = Math.min((W - pad * 2) / (maxX - minX), (H - pad * 2) / (maxY - minY));
   const xOffset = (W - (maxX - minX) * scale) / 2;
   const yOffset = (H - (maxY - minY) * scale) / 2;
   svg.append(element('rect', { x: 1, y: 1, width: W - 2, height: H - 2, rx: 8, fill: '#0c1923', stroke: '#253641' }));
+  const landLayer = element('g', { fill: '#294c4d', stroke: '#548277', 'stroke-width': 1, 'fill-rule': 'evenodd' });
+  svg.append(landLayer);
+  loadLand().then(polygons => {
+    if (!svg.isConnected) return;
+    for (const polygon of polygons) {
+      const paths = [];
+      for (const ring of polygon) {
+        let west = Infinity, east = -Infinity, south = Infinity, north = -Infinity;
+        const points = ring.map(([lon, lat]) => {
+          const x = xOffset + (longitude(lon) - minX) * scale;
+          const y = H - yOffset - (lat - minY) * scale;
+          west = Math.min(west, x); east = Math.max(east, x);
+          south = Math.min(south, y); north = Math.max(north, y);
+          return [x, y];
+        });
+        if (east < 0 || west > W || north < 0 || south > H) continue;
+        const clipped = clipRing(points, W, H);
+        if (clipped.length >= 3) paths.push(`M${clipped.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join('L')}Z`);
+      }
+      if (paths.length) landLayer.append(element('path', { d: paths.join('') }));
+    }
+  }).catch(() => {
+    if (!svg.isConnected) return;
+    const warning = document.createElement('p');
+    warning.className = 'warning';
+    warning.textContent = 'Could not load the offline basemap. The GPS route is shown without geographic context; check that map assets are installed and restart the server.';
+    container.append(warning);
+  });
   for (let index = 1; index < 4; index++) {
     svg.append(element('line', { x1: pad + index * (W - pad * 2) / 4, x2: pad + index * (W - pad * 2) / 4, y1: pad, y2: H - pad, class: 'grid-line' }));
     svg.append(element('line', { x1: pad, x2: W - pad, y1: pad + index * (H - pad * 2) / 4, y2: pad + index * (H - pad * 2) / 4, class: 'grid-line' }));
   }
   const palette = ['#54dbcb', '#9eafff', '#f5bc72', '#ff8b88', '#8ad3ff', '#d2a4ff'];
   for (const [index, route] of routes.entries()) {
-    const points = route.points.map(point => {
-      const px = point.lon * Math.cos(latitude * Math.PI / 180);
-      return `${xOffset + (px - minX) * scale},${H - yOffset - (point.lat - minY) * scale}`;
-    });
+    const position = point => [xOffset + (longitude(point.lon) - minX) * scale, H - yOffset - (point.lat - minY) * scale];
+    const points = route.points.map(point => position(point).join(','));
     const line = element('polyline', { points: points.join(' '), fill: 'none', stroke: palette[index % palette.length],
-      'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0.9 });
-    tooltip(line, `${route.activity.date?.slice(0, 10)} / ${route.activity.name}: ${number(route.activity.distance / 1000)} km`);
+      'stroke-width': 4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0.9 });
+    tooltip(line, `${route.activity.date?.slice(0, 10)} / ${route.activity.name}: ${route.activity.distance > 0 ? number(route.activity.distance / 1000) + ' km' : 'distance unavailable'}`);
     svg.append(line);
+    for (const [point, label, fill] of [[route.points[0], 'Start', '#54dbcb'], [route.points.at(-1), 'Finish', '#f5bc72']]) {
+      const [cx, cy] = position(point);
+      const marker = element('circle', { cx, cy, r: 6, fill, stroke: '#0c1923', 'stroke-width': 2 });
+      tooltip(marker, `${label} / ${route.activity.name}`);
+      svg.append(marker);
+    }
   }
+  svg.append(element('text', { x: 24, y: 25, class: 'axis-text' }, 'N'));
+  svg.append(element('text', { x: W - 24, y: H - 15, 'text-anchor': 'end', class: 'axis-text' }, 'START / FINISH'));
 }
 
 export function heatmap(container, cells) {

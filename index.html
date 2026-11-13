@@ -7,12 +7,13 @@
   <title>SWIMLAB / Personal swim analytics</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
+  <script defer src="/topojson-client.js"></script>
   <script type="module" src="/app.js"></script>
 </head>
 <body>
   <aside class="sidebar">
     <div class="brand"><span class="brand-icon">~</span> SWIMLAB<span class="brand-dot">.</span></div>
-    <div class="sidebar-note"><span class="live-dot"></span> LOCAL-FIRST<br><small>Your database stays on this computer.<br>Your API key is never saved.</small></div>
+    <div class="sidebar-note"><span class="live-dot"></span> <span id="storage-label">LOCAL-FIRST</span><br><small id="storage-note">Your database stays on this computer.<br>Your API key is never saved.</small></div>
   </aside>
   <main>
     <header>
@@ -39,10 +40,10 @@
     <details class="connection panel" id="connection" open>
       <summary>Connect &amp; sync <span>Garmin Personal API</span></summary>
       <form id="connect">
-        <label for="key">Personal API key</label>
+        <label for="key" id="key-label">Personal API key</label>
         <div class="controls"><input id="key" type="password" placeholder="Paste your personal API key" autocomplete="off" required><button id="submit">Sync Garmin + FIT</button><button type="button" id="demo" class="secondary">Explore demo</button><button type="button" id="cached" class="secondary">Load saved data</button></div>
       </form>
-      <p class="hint">Sync saves activity metrics, pool lengths and available open-water GPS points to a local SQLite database outside OneDrive. No account password, API keys or tokens are stored. Existing FIT files are cached; failed imports retry on the next sync.</p>
+      <p class="hint" id="connection-note">Sync saves activity metrics, pool lengths and available open-water GPS points to a local SQLite database outside OneDrive. No account password, API keys or tokens are stored. Existing FIT files are cached; failed imports retry on the next sync.</p>
       <progress id="progress" max="1" value="0" hidden aria-label="FIT import progress"></progress>
     </details>
     <p id="coverage" class="hint">No activities loaded.</p>
@@ -52,6 +53,12 @@
       <article><span>Moving pace</span><strong id="pace">--</strong><small>min:sec / 100 m, distance-weighted</small></article>
       <article><span>Sessions</span><strong id="count">--</strong><small id="count-note">in this view</small></article>
     </section>
+    <article class="panel stroke-overview">
+      <div class="panel-heading"><div><p class="eyebrow">YOUR STROKE MIX</p><h2>Every length, in perspective.</h2></div><span>FILTERED POOL SESSIONS</span></div>
+      <p class="hint" id="stroke-coverage"></p>
+      <div id="stroke-bar" class="stroke-bar" role="img"></div>
+      <div id="stroke-mix" class="stroke-mix"></div>
+    </article>
     </section>
     <section id="tab-performance" class="tab-panel" role="tabpanel" aria-labelledby="performance-tab" hidden>
       <div id="performance">
@@ -74,9 +81,11 @@
       </div>
     </section>
     <section id="tab-routes" class="tab-panel" role="tabpanel" aria-labelledby="routes-tab" hidden>
-      <div class="section-heading"><div><p class="eyebrow">04 / OPEN WATER</p><h2>Your routes</h2></div><span class="badge">LOCAL GPS ONLY</span></div>
-      <p class="hint">Routes come from GPS points already present in FIT files and stay in the local database. This relative route map uses no external map tiles or location services. Garmin FIT exports without GPS points cannot be drawn.</p>
+      <div class="section-heading"><div><p class="eyebrow">04 / OPEN WATER</p><h2>Your routes</h2></div><span class="badge">OFFLINE BASEMAP</span></div>
+      <p class="hint">All recorded GPS routes in the current view are shown together, with start and finish marked. The offline Natural Earth basemap shows approximate coastlines, without streets or local detail; no route coordinates are sent to map services. FIT exports without GPS points cannot be drawn.</p>
+      <p id="route-count" class="hint"></p>
       <article class="panel route-panel"><div id="route-map" class="route-map"></div></article>
+      <p class="hint">Map data: Natural Earth / <a class="text-link" href="/world-atlas-license.txt">World Atlas license</a> / <a class="text-link" href="/topojson-license.txt">TopoJSON license</a>. Not suitable for navigation.</p>
     </section>
     <section id="tab-records" class="tab-panel" role="tabpanel" aria-labelledby="records-tab" hidden>
       <div class="section-heading"><div><p class="eyebrow">05 / PERSONAL BESTS</p><h2>Your podium, not predictions</h2></div>
@@ -85,16 +94,34 @@
       </div>
       <p class="hint">Pool efforts use exact-distance windows of recorded FIT lengths, including rests between lengths. One best effort per session. IM requires equal butterfly / backstroke / breaststroke / freestyle legs in that order. These are locally calculated efforts, not Garmin's official personal records. Fastest session requires at least 100 m.</p>
       <article class="panel ranking-panel"><div class="panel-heading"><h3 id="ranking-title">Longest distance</h3><span id="ranking-count">TOP 3</span></div><div id="ranking-list"></div></article>
+      <div class="records-heading"><div><p class="eyebrow">EXPLORE YOUR EFFORTS</p><h2>Choose your stroke.</h2></div><span class="hint">Exact recorded distances</span></div>
+      <div id="record-groups" class="record-groups" aria-label="Filter records by stroke">
+        <button type="button" data-record-group="freestyle" aria-pressed="true">Freestyle</button>
+        <button type="button" data-record-group="breaststroke" aria-pressed="false">Breaststroke</button>
+        <button type="button" data-record-group="backstroke" aria-pressed="false">Backstroke</button>
+        <button type="button" data-record-group="butterfly" aria-pressed="false">Butterfly</button>
+        <button type="button" data-record-group="im" aria-pressed="false">Individual medley</button>
+        <button type="button" data-record-group="mixed" aria-pressed="false">Any stroke</button>
+        <button type="button" data-record-group="session" aria-pressed="false">Sessions</button>
+      </div>
       <div id="record-cards" class="record-grid"></div>
     </section>
     <section id="tab-logbook" class="tab-panel" role="tabpanel" aria-labelledby="logbook-tab" hidden>
       <div class="section-heading"><div><p class="eyebrow">04 / SWIM LOGBOOK</p><h2>Every metric. One place.</h2></div><span id="table-count" class="badge">0 SESSIONS</span></div>
-      <p class="hint">SPM = strokes / moving minutes. SPL = strokes / active lengths. DPS = metres / stroke. TPL = moving seconds / length. LPM = active lengths / moving minutes. Stroke mix is % of recorded active-length distance; drills, mixed and unknown remain Other. Missing metrics are shown as --, never zero-filled.</p>
+      <p class="hint">Click a column heading to sort. SPM = strokes / moving minutes. SPL = strokes / active lengths. DPS = metres / stroke. TPL = moving seconds / length. LPM = active lengths / moving minutes. Stroke percentages use all recorded active-length distance, including unclassified lengths. Missing metrics are shown as --, never zero-filled.</p>
+      <div class="logbook-filters panel" aria-label="Logbook filters">
+        <label>Minimum distance (m)<input id="distance-min" type="number" min="0" step="any" placeholder="No minimum"></label>
+        <label>Maximum distance (m)<input id="distance-max" type="number" min="0" step="any" placeholder="No maximum"></label>
+        <label>Pool length (m)<select id="pool-filter"><option value="all">All environments</option><option value="open_water">Open water</option><option value="unknown">Pool length unknown</option></select></label>
+        <button type="button" class="secondary" id="clear-logbook">Clear logbook filters</button>
+      </div>
+      <p id="logbook-filter-error" class="filter-error" role="status" aria-live="polite"></p>
+      <p class="hint">These filters affect the logbook and CSV export, not the dashboard charts.</p>
       <div class="panel table-panel"><div class="table-wrap" tabindex="0" aria-label="Scrollable swim metrics"><table><thead id="table-head"></thead><tbody id="sessions"></tbody></table></div></div>
       <details class="panel review-panel"><summary>Data quality &amp; exclusions <span id="quality-count"></span></summary><p class="hint">Conservative physical limits and robust pace deviations flag sessions, not delete them. Unusual does not mean wrong: technique drills and long rests may be legitimate. Include / exclude decisions are saved locally. Invalid FIT lengths never qualify for records.</p><div id="quality"></div></details>
       <details class="panel review-panel"><summary>Import coverage &amp; warnings <span id="import-count"></span></summary><div id="import-warnings" class="hint"></div></details>
     </section>
-    <footer>SWIMLAB / Independent personal dashboard, not affiliated with Garmin. Local, unencrypted health and optional GPS route data: protect this computer and its backups. Never expose this server to the Internet.</footer>
+    <footer id="privacy-note">SWIMLAB / Independent personal dashboard, not affiliated with Garmin. Local, unencrypted health and optional GPS route data: protect this computer and its backups. Never expose this server to the Internet.</footer>
   </main>
 </body>
 </html>

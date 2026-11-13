@@ -102,6 +102,49 @@ export function trainingHeatmap(activities) {
   return cells;
 }
 
+export function strokeMix(activities, lengths) {
+  const poolIds = new Set(activities.filter(a => a.type === 'pool').map(a => a.id));
+  const totals = { freestyle: 0, breaststroke: 0, backstroke: 0, butterfly: 0, other: 0 };
+  const covered = new Set();
+  for (const length of lengths) {
+    if (!poolIds.has(length.activityId) || !length.active || !positive(length.distance)) continue;
+    const stroke = Object.hasOwn(totals, length.stroke) ? length.stroke : 'other';
+    totals[stroke] += length.distance;
+    covered.add(length.activityId);
+  }
+  const total = Object.values(totals).reduce((sum, value) => sum + value, 0);
+  return {
+    total, sessions: covered.size, poolSessions: poolIds.size,
+    strokes: Object.entries(totals).map(([stroke, distance]) => ({
+      stroke, distance, percentage: total ? distance / total * 100 : null,
+    })),
+  };
+}
+
+export function sortSessions(activities, getValue, direction = 'ascending') {
+  const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+  const missing = value => value == null || typeof value === 'number' && !Number.isFinite(value);
+  return [...activities].sort((a, b) => {
+    const left = getValue(a), right = getValue(b);
+    if (missing(left) || missing(right)) return missing(left) === missing(right) ? 0 : missing(left) ? 1 : -1;
+    const result = typeof left === 'number' && typeof right === 'number'
+      ? left - right : collator.compare(String(left), String(right));
+    return direction === 'ascending' ? result : -result;
+  });
+}
+
+export function filterLogbook(activities, { minDistance = null, maxDistance = null, pool = 'all' }) {
+  return activities.filter(a => {
+    if ((minDistance != null || maxDistance != null) && !Number.isFinite(a.distance)) return false;
+    if (minDistance != null && a.distance < minDistance) return false;
+    if (maxDistance != null && a.distance > maxDistance) return false;
+    if (pool === 'open_water') return a.type === 'open_water';
+    if (pool === 'unknown') return a.type === 'pool' && !(a.poolLength > 0);
+    if (pool !== 'all') return a.type === 'pool' && a.poolLength === Number(pool);
+    return true;
+  });
+}
+
 const strokeOrder = ['butterfly', 'backstroke', 'breaststroke', 'freestyle'];
 const categories = [
   { key: '100m', distance: 100 }, { key: '200m', distance: 200 }, { key: '1000m', distance: 1000 },
@@ -119,7 +162,7 @@ export function personalBests(activities, lengths, limit = 3) {
     byId.get(length.activityId).push(length);
   }
   for (const activity of activities) {
-    const entry = { id: activity.id, name: activity.name, date: activity.date };
+    const entry = { id: activity.id, name: activity.name, date: activity.date, pace: activity.pace };
     if (activity.distance > 0) result['Longest session'].push({ ...entry, value: activity.distance });
     if (activity.distance >= 100 && activity.pace > 0) result['Fastest session'].push({ ...entry, value: activity.pace });
     if (activity.type !== 'pool') continue;
@@ -153,7 +196,7 @@ export function personalBests(activities, lengths, limit = 3) {
         }
       }
       // One best effort per session avoids filling the podium with overlapping windows.
-      if (best != null) result[category.key].push({ ...entry, value: best });
+      if (best != null) result[category.key].push({ ...entry, value: best, pace: best * 100 / category.distance });
     }
   }
   for (const [key, entries] of Object.entries(result)) {
@@ -173,7 +216,7 @@ export function sessionRankings(activities, metric, limit = 5) {
     : metric === 'pace' ? a.distance >= 100 && a.pace > 0 : a.swolf > 0);
   const value = a => metric === 'distance' ? a.distance : metric === 'pace' ? a.pace : a.swolf;
   return candidates.sort((a, b) => metric === 'distance' ? value(b) - value(a) : value(a) - value(b))
-    .slice(0, limit).map(a => ({ id: a.id, name: a.name, date: a.date, value: value(a), type: a.type }));
+    .slice(0, limit).map(a => ({ id: a.id, name: a.name, date: a.date, value: value(a), type: a.type, pace: a.pace }));
 }
 
 export function trainingSummary(activities) {

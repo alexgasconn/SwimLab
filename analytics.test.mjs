@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveMetrics, annotateOutliers, histogram, weeklyTrend, trainingHeatmap, personalBests, sessionRankings, swolfTrend, trainingSummary } from './analytics.mjs';
+import { deriveMetrics, annotateOutliers, histogram, weeklyTrend, trainingHeatmap, personalBests, sessionRankings, swolfTrend, trainingSummary, strokeMix, sortSessions, filterLogbook } from './analytics.mjs';
 
 const activity = overrides => deriveMetrics({
   id: '1', name: 'Swim', date: '2026-10-12T08:30:00', type: 'pool', distance: 1000,
@@ -54,6 +54,8 @@ test('records require exact FIT windows, include rests, and do not estimate from
   const result = personalBests([a], lengths);
   assert.equal(result['100m'][0].value, 135);
   assert.equal(result['200m'][0].value, 275);
+  assert.equal(result['200m'][0].pace, 137.5);
+  assert.equal(result['50m freestyle'][0].pace, 130);
   assert.equal(result['100m'].length, 1);
   assert.equal(result['1000m'].length, 0);
   assert.equal(personalBests([a], [])['100m'].length, 0);
@@ -84,6 +86,8 @@ test('podiums show three distinct sessions and fastest sessions have a minimum d
   assert.deepEqual(records['Longest session'].map(a => a.id), ['4', '3', '2']);
   assert.equal(records['Fastest session'].some(a => a.id === '5'), false);
   assert.equal(records['Fastest session'].length, 3);
+  assert.equal(records['Longest session'][0].pace, 30);
+  assert.equal(records['Fastest session'][0].pace, records['Fastest session'][0].value);
 });
 
 test('stroke-specific bests use exact windows and rankings respect selected metric and limit', () => {
@@ -99,6 +103,8 @@ test('stroke-specific bests use exact windows and rankings respect selected metr
   assert.equal(records['100m freestyle'].length, 1);
   assert.equal(records['100m breaststroke'].length, 0);
   assert.deepEqual(sessionRankings(rows, 'distance', 2).map(row => row.id), ['3', '2']);
+  assert.equal(sessionRankings(rows, 'distance', 1)[0].pace, 125);
+  assert.equal(sessionRankings([activity({ movingTime: null })], 'distance')[0].pace, null);
   assert.deepEqual(sessionRankings(rows, 'pace', 1).map(row => row.id), ['2']);
   assert.deepEqual(sessionRankings(rows, 'swolf', 2).map(row => row.id), ['2', '1']);
   assert.deepEqual(swolfTrend(rows).map(row => row.id), ['1', '2', '3']);
@@ -113,4 +119,46 @@ test('environment summaries include session shares and per-pool-length averages'
   assert.equal(summary.openWater.sessions, 1);
   assert.deepEqual(summary.poolLengths.map(row => row.length), [25, 50]);
   assert.equal(summary.poolLengths[0].averageDistance, 1000);
+});
+
+test('stroke totals use recorded pool length distances and preserve unknown strokes', () => {
+  const rows = [activity({ id: '1' }), activity({ id: '2' }), activity({ id: '3', type: 'open_water' })];
+  const lengths = [
+    { activityId: '1', active: true, distance: 25, stroke: 'freestyle' },
+    { activityId: '1', active: true, distance: 25, stroke: 'drill' },
+    { activityId: '2', active: true, distance: 50, stroke: 'backstroke' },
+    { activityId: '2', active: false, distance: 25, stroke: 'freestyle' },
+    { activityId: '3', active: true, distance: 100, stroke: 'freestyle' },
+    { activityId: 'missing', active: true, distance: 100, stroke: 'freestyle' },
+  ];
+  const result = strokeMix(rows, lengths);
+  assert.equal(result.total, 100);
+  assert.equal(result.sessions, 2);
+  assert.equal(result.strokes.find(item => item.stroke === 'freestyle').percentage, 25);
+  assert.equal(result.strokes.find(item => item.stroke === 'backstroke').percentage, 50);
+  assert.equal(result.strokes.find(item => item.stroke === 'other').percentage, 25);
+  assert.equal(strokeMix(rows, []).strokes[0].percentage, null);
+});
+
+test('session sorting uses raw numbers and keeps missing values last in both directions', () => {
+  const rows = [activity({ id: 'a', distance: 10000 }), activity({ id: 'b', distance: null }),
+    activity({ id: 'c', distance: 900 }), activity({ id: 'd', distance: 1000 })];
+  assert.deepEqual(sortSessions(rows, a => a.distance).map(a => a.id), ['c', 'd', 'a', 'b']);
+  assert.deepEqual(sortSessions(rows, a => a.distance, 'descending').map(a => a.id), ['a', 'd', 'c', 'b']);
+  assert.deepEqual(rows.map(a => a.id), ['a', 'b', 'c', 'd']);
+});
+
+test('logbook filters combine inclusive distance bounds with exact pool length or environment', () => {
+  const rows = [
+    activity({ id: 'a', distance: 1000, poolLength: 25 }),
+    activity({ id: 'b', distance: 2000, poolLength: 50 }),
+    activity({ id: 'c', distance: 1500, poolLength: null }),
+    activity({ id: 'd', distance: 1500, type: 'open_water', poolLength: null }),
+    activity({ id: 'e', distance: null, poolLength: 25 }),
+  ];
+  assert.deepEqual(filterLogbook(rows, { minDistance: 1000, maxDistance: 1500 }).map(a => a.id), ['a', 'c', 'd']);
+  assert.deepEqual(filterLogbook(rows, { minDistance: 1000, pool: '25' }).map(a => a.id), ['a']);
+  assert.deepEqual(filterLogbook(rows, { pool: 'unknown' }).map(a => a.id), ['c']);
+  assert.deepEqual(filterLogbook(rows, { pool: 'open_water' }).map(a => a.id), ['d']);
+  assert.equal(filterLogbook(rows, {}).length, 5);
 });
