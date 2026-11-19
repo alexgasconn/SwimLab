@@ -147,11 +147,13 @@ export function filterLogbook(activities, { minDistance = null, maxDistance = nu
 
 const strokeOrder = ['butterfly', 'backstroke', 'breaststroke', 'freestyle'];
 const categories = [
-  { key: '100m', distance: 100 }, { key: '200m', distance: 200 }, { key: '1000m', distance: 1000 },
+  { key: '100m', distance: 100 }, { key: '200m', distance: 200 },
+  { key: '500m', distance: 500 }, { key: '1000m', distance: 1000 },
+  { key: '80m IM', distance: 80, medley: true, poolLength: 20 },
+  { key: '160m IM', distance: 160, medley: true, poolLength: 20 },
   { key: '100m IM', distance: 100, medley: true }, { key: '200m IM', distance: 200, medley: true },
-  { key: '400m IM', distance: 400, medley: true },
   ...['freestyle', 'breaststroke', 'backstroke', 'butterfly'].flatMap(stroke =>
-    [50, 100, 200, 400].map(distance => ({ key: `${distance}m ${stroke}`, distance, stroke }))),
+    [50, 100, 200, 400, 500, 750, 1000].map(distance => ({ key: `${distance}m ${stroke}`, distance, stroke }))),
 ];
 
 export function personalBests(activities, lengths, limit = 3) {
@@ -168,6 +170,7 @@ export function personalBests(activities, lengths, limit = 3) {
     if (activity.type !== 'pool') continue;
     const active = (byId.get(activity.id) ?? []).filter(l => l.active).sort((a, b) => a.sequence - b.sequence);
     for (const category of categories) {
+      if (category.poolLength != null && activity.poolLength !== category.poolLength) continue;
       if (category.stroke && category.stroke !== 'freestyle' && !active.some(l => l.stroke === category.stroke)) continue;
       let best = null;
       for (let start = 0; start < active.length; start++) {

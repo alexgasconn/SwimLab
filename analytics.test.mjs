@@ -79,6 +79,56 @@ test('IM records enforce ordered equal legs; bad times and wrong strokes never q
   assert.equal(personalBests([a], lengths)['100m'].length, 0);
 });
 
+test('500m and 1000m records use exact lengths; 20m IM records are limited to 20m pools', () => {
+  const longSwim = activity({ id: 'long', poolLength: 20 });
+  const lengths = Array.from({ length: 50 }, (_, i) => ({
+    activityId: 'long', sequence: i, active: true, distance: 20, start: i * 30, duration: 25, stroke: 'freestyle',
+  }));
+  const records = personalBests([longSwim], lengths);
+  assert.equal(records['500m'][0].value, 745);
+  assert.equal(records['1000m'][0].value, 1495);
+
+  const imLengths = (activityId, lengthsPerStroke) =>
+    ['butterfly', 'backstroke', 'breaststroke', 'freestyle']
+      .flatMap(stroke => Array.from({ length: lengthsPerStroke }, () => stroke))
+      .map((stroke, i) => ({
+        activityId, sequence: i, active: true, distance: 20, start: i * 30, duration: 25, stroke,
+      }));
+  const im80 = activity({ id: 'im80', poolLength: 20 });
+  const im160 = activity({ id: 'im160', poolLength: 20 });
+  const im25 = activity({ id: 'im25', poolLength: 25 });
+  assert.equal(personalBests([im80], imLengths('im80', 1))['80m IM'][0].value, 115);
+  assert.equal(personalBests([im160], imLengths('im160', 2))['160m IM'][0].value, 235);
+  assert.equal(personalBests([im25], imLengths('im25', 1))['80m IM'].length, 0);
+  assert.equal(personalBests([im25], imLengths('im25', 2))['160m IM'].length, 0);
+});
+
+test('every stroke has all requested distances and IM has only the requested distances', () => {
+  const strokes = ['freestyle', 'breaststroke', 'backstroke', 'butterfly'];
+  const distances = [50, 100, 200, 400, 500, 750, 1000];
+  const activities = strokes.map((_, i) => activity({ id: `stroke-${i}`, poolLength: 25 }));
+  const lengths = strokes.flatMap((stroke, strokeIndex) =>
+    Array.from({ length: 40 }, (_, i) => ({
+      activityId: `stroke-${strokeIndex}`, sequence: i, active: true, distance: 25,
+      start: i * 31, duration: 30, stroke,
+    })));
+  const records = personalBests(activities, lengths, 1);
+  for (const stroke of strokes) {
+    for (const distance of distances) assert.equal(records[`${distance}m ${stroke}`].length, 1);
+  }
+
+  const imStrokes = ['butterfly', 'backstroke', 'breaststroke', 'freestyle'];
+  const imLengths = imStrokes.flatMap(stroke => Array.from({ length: 2 }, () => stroke))
+    .map((stroke, i) => ({
+      activityId: 'im200', sequence: i, active: true, distance: 25, start: i * 31, duration: 30, stroke,
+    }));
+  const im200 = activity({ id: 'im200', poolLength: 25 });
+  const imRecords = personalBests([im200], imLengths);
+  assert.equal(imRecords['100m IM'].length, 0);
+  assert.equal(imRecords['200m IM'].length, 1);
+  assert.equal(Object.hasOwn(imRecords, '400m IM'), false);
+});
+
 test('podiums show three distinct sessions and fastest sessions have a minimum distance', () => {
   const rows = [activity({ id: '1' }), activity({ id: '2', distance: 1500 }), activity({ id: '3', distance: 2000 }),
     activity({ id: '4', distance: 4000 }), activity({ id: '5', distance: 25, movingTime: 20 })];

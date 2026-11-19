@@ -31,9 +31,10 @@ SQLite is experimental in Node 22 and may print a warning.
   start time, not the computer's conversion of GPS timestamps or hours swum.
 - Pool / open-water, date-range and excluded-session filters affect the dashboard.
 - Configurable top 3/5/10 rankings by distance, pace or SWOLF. Exact-length
-  50/100/200/400 m efforts by stroke, 100/200/1000 m efforts, 100/200/400 m IM
-  efforts, and longest / fastest sessions use the current filtered view. Use
-  the stroke selector to explore each group independently.
+  50/100/200/400/500/750/1000 m efforts by stroke, 100/200/500/1000 m efforts,
+  80/160 m IM efforts for 20 m pools, 100/200 m IM efforts, and longest /
+  fastest sessions use the current filtered view. Use the stroke selector to
+  explore each group independently.
 - Overall stroke mix is weighted by recorded active pool-length distance in the
   filtered view. Drills, mixed and unknown lengths remain in the denominator,
   even though they are not displayed as a separate stroke. Sessions without
