@@ -23,6 +23,97 @@ const median = values => {
   return n ? (sorted[Math.floor((n - 1) / 2)] + sorted[Math.floor(n / 2)]) / 2 : null;
 };
 
+export function activityAnalysis(activity, lengths = [], records = []) {
+  const samples = records.filter(r => Number.isFinite(r.timestamp)).sort((a, b) => a.timestamp - b.timestamp);
+  let activeIndex = 0;
+  const rows = lengths.filter(l => l.activityId === activity.id).sort((a, b) => a.sequence - b.sequence).map(l => {
+    const duration = positive(l.duration);
+    const distance = l.active ? positive(l.distance) : null;
+    const strokes = l.active ? nonnegative(l.strokes) : null;
+    const end = Number.isFinite(l.start) && duration ? l.start + duration : null;
+    const hr = end == null ? [] : samples.filter(r => r.timestamp >= l.start && r.timestamp < end && positive(r.heartRate));
+    return { ...l, index: l.active ? ++activeIndex : null, end,
+      pace: duration && distance ? duration * 100 / distance : null,
+      swolf: duration && strokes != null ? duration + strokes : null,
+      dps: distance && strokes > 0 ? distance / strokes : null, spl: strokes,
+      spm: duration && strokes != null ? strokes * 60 / duration : null,
+      lpm: duration && distance ? 60 / duration : null,
+      heartRate: hr.length ? hr.reduce((sum, r) => sum + r.heartRate, 0) / hr.length : null, hrSamples: hr.length };
+  });
+  const active = rows.filter(r => r.active && r.pace != null);
+  const blocks = [];
+  let block = null, previous = null;
+  for (const row of rows) {
+    if (!row.active || row.pace == null) { block = null; previous = row; continue; }
+    const gap = previous?.end != null && Number.isFinite(row.start) ? row.start - previous.end : null;
+    if (!block || block.stroke !== row.stroke || gap > 15 || gap < -0.5 || row.sequence !== previous.sequence + 1) {
+      block = { number: blocks.length + 1, stroke: row.stroke, rows: [] };
+      blocks.push(block);
+    }
+    block.rows.push(row);
+    previous = row;
+  }
+  for (const b of blocks) {
+    b.distance = b.rows.reduce((sum, r) => sum + r.distance, 0);
+    b.duration = b.rows.reduce((sum, r) => sum + r.duration, 0);
+    b.pace = b.duration * 100 / b.distance;
+    b.start = b.rows[0].start;
+    b.end = b.rows.at(-1).end;
+    b.elapsed = Number.isFinite(b.start) && b.end != null ? b.end - b.start : null;
+  }
+  const timed = rows.filter(r => Number.isFinite(r.start) && r.end != null);
+  const starts = [...timed.map(r => r.start), ...samples.map(r => r.timestamp)];
+  const origin = starts.length ? starts.reduce((min, value) => Math.min(min, value), Infinity) : null;
+  const blockByFirst = new Map(blocks.map(b => [b.rows[0], b]));
+  const intervals = [];
+  let latestEnd = null;
+  for (const row of rows) {
+    if (Number.isFinite(row.start) && latestEnd != null && row.start - latestEnd > 15) {
+      intervals.push({ kind: 'gap', start: latestEnd, duration: row.start - latestEnd });
+    }
+    if (blockByFirst.has(row)) intervals.push({ ...blockByFirst.get(row), kind: 'swim' });
+    if (!row.active) intervals.push({ kind: 'rest', start: row.start, duration: positive(row.duration) });
+    if (row.end != null) latestEnd = Math.max(latestEnd ?? row.end, row.end);
+  }
+  const heartRates = samples.map(r => positive(r.heartRate)).filter(v => v != null);
+  const hrGaps = samples.slice(1).map((r, i) => r.timestamp - samples[i].timestamp).filter(v => v > 0);
+  const warnings = [];
+  const invalid = rows.filter(r => r.active && r.pace == null).length;
+  if (invalid) warnings.push(`${invalid} active lengths have missing distance or duration and cannot enter pace analysis.`);
+  if (timed.length !== rows.length && rows.length) warnings.push(`${rows.length - timed.length} lengths lack valid timing; they are omitted from the time ribbon and HR alignment.`);
+  if (timed.some((r, i) => i && r.start < timed[i - 1].end - 0.5)) warnings.push('FIT length intervals overlap. Detected blocks are split at overlaps; check sensor recording.');
+  if (activity.type === 'pool' && active.length && Math.abs(active.reduce((sum, r) => sum + r.distance, 0) - activity.distance) > Math.max(2, activity.distance * 0.02)) {
+    warnings.push('Recorded length distance differs from the session summary; length charts use FIT lengths, not rescaled values.');
+  }
+  return { rows, active, blocks, intervals, timed, samples, origin, warnings,
+    hr: { count: heartRates.length, min: heartRates.length ? heartRates.reduce((a, b) => Math.min(a, b)) : null,
+      max: heartRates.length ? heartRates.reduce((a, b) => Math.max(a, b)) : null, median: median(heartRates),
+      gapLimit: Math.max(15, (median(hrGaps) ?? 5) * 3) } };
+}
+
+export function lengthTrend(rows, metric) {
+  const values = rows.filter(r => Number.isFinite(r[metric]));
+  if (values.length < 8) return { n: values.length, first: null, last: null, change: null };
+  const count = Math.floor(values.length / 4);
+  const first = median(values.slice(0, count).map(r => r[metric]));
+  const last = median(values.slice(-count).map(r => r[metric]));
+  return { n: values.length, first, last, change: first !== 0 ? (last / first - 1) * 100 : null };
+}
+
+export function lengthCorrelation(rows, xKey, yKey) {
+  const pairs = rows.filter(r => Number.isFinite(r[xKey]) && Number.isFinite(r[yKey]));
+  if (pairs.length < 5) return { n: pairs.length, r: null, slope: null, intercept: null };
+  const meanX = pairs.reduce((sum, p) => sum + p[xKey], 0) / pairs.length;
+  const meanY = pairs.reduce((sum, p) => sum + p[yKey], 0) / pairs.length;
+  let xx = 0, yy = 0, xy = 0;
+  for (const p of pairs) {
+    const dx = p[xKey] - meanX, dy = p[yKey] - meanY;
+    xx += dx * dx; yy += dy * dy; xy += dx * dy;
+  }
+  return { n: pairs.length, r: xx > 0 && yy > 0 ? xy / Math.sqrt(xx * yy) : null,
+    slope: xx > 0 && yy > 0 ? xy / xx : null, intercept: xx > 0 && yy > 0 ? meanY - xy / xx * meanX : null };
+}
+
 export function annotateOutliers(activities) {
   const groups = new Map(['pool', 'open_water'].map(type => {
     const logs = activities.filter(a => a.type === type && a.pace > 0).map(a => Math.log(a.pace));
@@ -146,6 +237,7 @@ export function filterLogbook(activities, { minDistance = null, maxDistance = nu
 }
 
 const strokeOrder = ['butterfly', 'backstroke', 'breaststroke', 'freestyle'];
+const strokeDistances = [40, 50, 80, 100, 150, 160, 200, 250, 400, 500, 700, 750, 1000, 1500];
 const categories = [
   { key: '100m', distance: 100 }, { key: '200m', distance: 200 },
   { key: '500m', distance: 500 }, { key: '1000m', distance: 1000 },
@@ -153,11 +245,13 @@ const categories = [
   { key: '160m IM', distance: 160, medley: true, poolLength: 20 },
   { key: '100m IM', distance: 100, medley: true }, { key: '200m IM', distance: 200, medley: true },
   ...['freestyle', 'breaststroke', 'backstroke', 'butterfly'].flatMap(stroke =>
-    [50, 100, 200, 400, 500, 750, 1000].map(distance => ({ key: `${distance}m ${stroke}`, distance, stroke }))),
+    strokeDistances.map(distance => ({ key: `${distance}m ${stroke}`, distance, stroke }))),
 ];
 
 export function personalBests(activities, lengths, limit = 3) {
-  const result = Object.fromEntries([...categories.map(c => [c.key, []]), ['Longest session', []], ['Fastest session', []]]);
+  const result = Object.fromEntries([...categories.map(c => c.key),
+    'Longest session', 'Fastest session', 'Longest open water', 'Fastest open water'].map(key => [key, []]));
+  const attempts = Object.fromEntries(categories.map(category => [category.key, 0]));
   const byId = new Map();
   for (const length of lengths) {
     if (!byId.has(length.activityId)) byId.set(length.activityId, []);
@@ -167,12 +261,16 @@ export function personalBests(activities, lengths, limit = 3) {
     const entry = { id: activity.id, name: activity.name, date: activity.date, pace: activity.pace };
     if (activity.distance > 0) result['Longest session'].push({ ...entry, value: activity.distance });
     if (activity.distance >= 100 && activity.pace > 0) result['Fastest session'].push({ ...entry, value: activity.pace });
+    if (activity.type === 'open_water') {
+      if (activity.distance > 0) result['Longest open water'].push({ ...entry, value: activity.distance });
+      if (activity.distance >= 100 && activity.pace > 0) result['Fastest open water'].push({ ...entry, value: activity.pace });
+    }
     if (activity.type !== 'pool') continue;
     const active = (byId.get(activity.id) ?? []).filter(l => l.active).sort((a, b) => a.sequence - b.sequence);
     for (const category of categories) {
       if (category.poolLength != null && activity.poolLength !== category.poolLength) continue;
       if (category.stroke && category.stroke !== 'freestyle' && !active.some(l => l.stroke === category.stroke)) continue;
-      let best = null;
+      const efforts = [];
       for (let start = 0; start < active.length; start++) {
         let distance = 0;
         let previousEnd = null;
@@ -193,19 +291,27 @@ export function personalBests(activities, lengths, limit = 3) {
           if (distance > category.distance + 0.01) break;
           if (Math.abs(distance - category.distance) < 0.01) {
             const time = previousEnd - active[start].start;
-            if (time > 0 && (best == null || time < best)) best = time;
+            if (time > 0) efforts.push({ start, end, time });
             break;
           }
         }
       }
+      let previousEnd = -1;
+      for (const effort of efforts.sort((a, b) => a.end - b.end || a.start - b.start)) {
+        if (effort.start <= previousEnd) continue;
+        attempts[category.key]++;
+        previousEnd = effort.end;
+      }
+      const best = efforts.reduce((minimum, effort) => Math.min(minimum, effort.time), Infinity);
       // One best effort per session avoids filling the podium with overlapping windows.
-      if (best != null) result[category.key].push({ ...entry, value: best, pace: best * 100 / category.distance });
+      if (Number.isFinite(best)) result[category.key].push({ ...entry, value: best, pace: best * 100 / category.distance });
     }
   }
   for (const [key, entries] of Object.entries(result)) {
-    entries.sort((a, b) => key === 'Longest session' ? b.value - a.value : a.value - b.value);
+    entries.sort((a, b) => key.startsWith('Longest ') ? b.value - a.value : a.value - b.value);
     result[key] = entries.slice(0, limit);
   }
+  result.attempts = attempts;
   return result;
 }
 

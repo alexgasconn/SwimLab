@@ -31,10 +31,11 @@ SQLite is experimental in Node 22 and may print a warning.
   start time, not the computer's conversion of GPS timestamps or hours swum.
 - Pool / open-water, date-range and excluded-session filters affect the dashboard.
 - Configurable top 3/5/10 rankings by distance, pace or SWOLF. Exact-length
-  50/100/200/400/500/750/1000 m efforts by stroke, 100/200/500/1000 m efforts,
-  80/160 m IM efforts for 20 m pools, 100/200 m IM efforts, and longest /
-  fastest sessions use the current filtered view. Use the stroke selector to
-  explore each group independently.
+  40/50/80/100/150/160/200/250/400/500/700/750/1000/1500 m efforts by stroke, 100/200/500/1000 m
+  efforts, 80/160 m IM efforts for 20 m pools, 100/200 m IM efforts, and
+  longest / fastest sessions use the current filtered view. Use the stroke
+  selector to explore each group independently.
+  Open water has separate whole-session distance and moving-pace podiums (no GPS splits).
 - Overall stroke mix is weighted by recorded active pool-length distance in the
   filtered view. Drills, mixed and unknown lengths remain in the denominator,
   even though they are not displayed as a separate stroke. Sessions without
@@ -47,6 +48,39 @@ SQLite is experimental in Node 22 and may print a warning.
   These filters also apply to CSV export, but not the other dashboard views.
   Reversible per-session review and import warnings remain available.
 - Demo data is explicitly synthetic and never written to SQLite.
+
+## Activity lab
+
+Click an activity's ID, date or name in the logbook, a podium date, or a point in
+the pace/SWOLF charts or a route on the map to open its dedicated `#activity=<id>` page. Links can be
+copied and reloaded; Back returns to the previous dashboard tab and its filters.
+The detail page shows the selected activity even if it is excluded from analytics.
+
+Four internal tabs keep the analysis readable:
+- Overview: session totals, stroke distance shares and a timestamped length/rest ribbon.
+- Sets & lengths: a chronological, expandable list of detected sets and recorded rests,
+  with unrecorded gaps identified separately, plus pace/stroke charts and
+  a detailed table including duration, timer, DPS, SPM, LPM, SWOLF and aligned HR.
+- Technique & trends: per-stroke/pool-length charts, first/last-quarter medians
+  (minimum eight measured lengths), and descriptive Pearson correlations
+  (minimum five varying pairs). Shared metric formulas are not evidence of causation.
+- HR & GPS: actual FIT HR samples, recording gaps, sample statistics, optional
+  device temperature and open-water route, recorded speed/pace and distance.
+
+FIT sensor records are saved separately in SQLite/PostgreSQL and fetched only for
+the opened activity, not with every dashboard page. The next **Sync Garmin + FIT**
+also enriches previously completed FIT caches once; an export with no timed records
+is marked unavailable and is not repeatedly downloaded for missing HR.
+Opening detail never contacts Garmin. Missing HR is explicitly reported: a session
+average never becomes an invented temporal curve or personalized HR zones.
+
+Length SWOLF is elapsed length seconds + recorded strokes; it may differ from the
+Garmin summary. Length HR averages only samples in `[start, end)` and is not
+time-weighted. Block boundaries come from rest, stroke changes, >15-second gaps,
+missing/invalid lengths and overlaps; blocks are **inferred, not official Garmin laps**.
+Blank timeline intervals are unrecorded, not assumed to be rest. OW pace is
+`100 / recorded speed` and remains susceptible to GPS noise. Synthetic sensor
+samples are available only in the clearly labelled demo.
 
 ## Metric definitions
 
@@ -77,6 +111,8 @@ metre records. IM requires equal butterfly / backstroke / breaststroke / freesty
 legs, in that order. Drills, mixed/unknown strokes, overlapping timestamps and
 implausible length times cannot qualify. Each session contributes at most one
 best effort per category, so overlapping windows cannot fill a podium.
+Each distance card also shows the number of valid, non-overlapping attempts in the
+current filtered view.
 Fastest session uses moving pace and a minimum 100 m session distance.
 Record cards show the pace per 100 m for the recorded effort, including rests;
 session records and rankings show the session's moving pace when available.

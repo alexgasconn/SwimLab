@@ -29,6 +29,7 @@ export function openStore(path = defaultDatabase()) {
       ${Object.entries(fields).map(([field, column]) => `${column} ${textFields.has(field) ? 'TEXT' : 'REAL'}${field === 'id' ? ' PRIMARY KEY' : ''}`).join(',')},
       raw_metrics TEXT NOT NULL, fit_status TEXT NOT NULL DEFAULT 'pending', fit_error TEXT,
       route_status TEXT NOT NULL DEFAULT 'pending',
+      records_status TEXT NOT NULL DEFAULT 'pending',
       review TEXT CHECK(review IS NULL OR review IN ('include','exclude')), imported_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS lengths (
@@ -40,6 +41,12 @@ export function openStore(path = defaultDatabase()) {
     CREATE TABLE IF NOT EXISTS route_points (
       activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
       sequence INTEGER NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL,
+      PRIMARY KEY(activity_id,sequence)
+    );
+    CREATE TABLE IF NOT EXISTS activity_records (
+      activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
+      sequence INTEGER NOT NULL, timestamp_s REAL NOT NULL, heart_rate REAL,
+      distance_m REAL, speed_mps REAL, cadence REAL, temperature_c REAL,
       PRIMARY KEY(activity_id,sequence)
     );
     CREATE INDEX IF NOT EXISTS activities_date ON activities(local_start);
@@ -56,6 +63,7 @@ export function openStore(path = defaultDatabase()) {
   if (!activityColumns.has('route_status')) {
     db.exec("ALTER TABLE activities ADD COLUMN route_status TEXT NOT NULL DEFAULT 'pending'; UPDATE activities SET route_status='not_applicable' WHERE swim_type='pool';");
   }
+  if (!activityColumns.has('records_status')) db.exec("ALTER TABLE activities ADD COLUMN records_status TEXT NOT NULL DEFAULT 'pending';");
   const transaction = fn => {
     db.exec('BEGIN IMMEDIATE');
     try { const result = fn(); db.exec('COMMIT'); return result; }
@@ -88,23 +96,26 @@ export function openStore(path = defaultDatabase()) {
           if (changed) {
             db.prepare('DELETE FROM lengths WHERE activity_id=?').run(a.id);
             db.prepare('DELETE FROM route_points WHERE activity_id=?').run(a.id);
+            db.prepare('DELETE FROM activity_records WHERE activity_id=?').run(a.id);
           }
           upsert.run(...Object.keys(fields).map(field => a[field] ?? null), raw, new Date().toISOString());
           if (!previous || changed) {
             db.prepare('UPDATE activities SET route_status=? WHERE id=?')
               .run(a.type === 'open_water' ? 'pending' : 'not_applicable', a.id);
+            db.prepare("UPDATE activities SET records_status='pending' WHERE id=?").run(a.id);
           }
         }
         setMetadata('history', JSON.stringify({ scanned: history.scanned, truncated: history.truncated, syncedAt: new Date().toISOString() }));
       });
     },
     pending() {
-      return db.prepare("SELECT id FROM activities WHERE fit_status IN ('pending','error') OR (swim_type='open_water' AND route_status='pending') ORDER BY local_start DESC").all().map(row => row.id);
+      return db.prepare("SELECT id FROM activities WHERE fit_status IN ('pending','error') OR (swim_type='open_water' AND route_status='pending') OR (fit_status='complete' AND records_status='pending') ORDER BY local_start DESC").all().map(row => row.id);
     },
     saveFit(id, data) {
       transaction(() => {
         db.prepare('DELETE FROM lengths WHERE activity_id=?').run(id);
         db.prepare('DELETE FROM route_points WHERE activity_id=?').run(id);
+        db.prepare('DELETE FROM activity_records WHERE activity_id=?').run(id);
         const insert = db.prepare('INSERT INTO lengths VALUES (?,?,?,?,?,?,?,?,?)');
         for (const l of data.lengths) insert.run(id, l.sequence, Number(l.active), l.start, l.duration, l.timerTime, l.distance, l.strokes, l.stroke);
         const entries = Object.entries(data.metrics).filter(([field]) => fitFields.has(field));
@@ -113,10 +124,14 @@ export function openStore(path = defaultDatabase()) {
         const routePoints = activity.swim_type === 'open_water' ? (data.routePoints ?? []) : [];
         const routeInsert = db.prepare('INSERT INTO route_points VALUES (?,?,?,?)');
         for (const point of routePoints) routeInsert.run(id, point.sequence, point.lat, point.lon);
+        const records = data.records ?? [];
+        const recordInsert = db.prepare('INSERT INTO activity_records VALUES (?,?,?,?,?,?,?,?)');
+        for (const record of records) recordInsert.run(id, record.sequence, record.timestamp, record.heartRate,
+          record.distance, record.speed, record.cadence, record.temperature);
         db.prepare(`UPDATE activities SET ${entries.map(([field]) => `${fields[field]}=?`).join(',')}${entries.length ? ',' : ''}
-          fit_status='complete',fit_error=NULL,route_status=? WHERE id=?`)
+          fit_status='complete',fit_error=NULL,route_status=?,records_status=? WHERE id=?`)
           .run(...entries.map(([, value]) => value), activity.swim_type !== 'open_water' ? 'not_applicable'
-            : routePoints.length >= 2 ? 'complete' : 'unavailable', id);
+            : routePoints.length >= 2 ? 'complete' : 'unavailable', records.length ? 'complete' : 'unavailable', id);
       });
     },
     markFit(id, state, error) {
@@ -127,10 +142,18 @@ export function openStore(path = defaultDatabase()) {
     review(id, decision) {
       return db.prepare('UPDATE activities SET review=? WHERE id=?').run(decision, id).changes;
     },
+    activityRecords(id) {
+      const activity = db.prepare('SELECT records_status FROM activities WHERE id=?').get(id);
+      if (!activity) return null;
+      const records = db.prepare('SELECT * FROM activity_records WHERE activity_id=? ORDER BY timestamp_s,sequence').all(id)
+        .map(row => ({ sequence: row.sequence, timestamp: row.timestamp_s, heartRate: row.heart_rate,
+          distance: row.distance_m, speed: row.speed_mps, cadence: row.cadence, temperature: row.temperature_c }));
+      return { records, recordsStatus: activity.records_status };
+    },
     data() {
       const activities = db.prepare('SELECT * FROM activities ORDER BY local_start DESC').all().map(row => deriveMetrics({
         ...Object.fromEntries(Object.entries(fields).map(([field, column]) => [field, row[column]])),
-        review: row.review, fitStatus: row.fit_status, fitError: row.fit_error, routeStatus: row.route_status,
+        review: row.review, fitStatus: row.fit_status, fitError: row.fit_error, routeStatus: row.route_status, recordsStatus: row.records_status,
       }));
       const lengths = db.prepare('SELECT * FROM lengths ORDER BY activity_id,sequence').all().map(l => ({
         activityId: l.activity_id, sequence: l.sequence, active: Boolean(l.active), start: l.start_s,

@@ -22,6 +22,12 @@ export function cloudHandler(endpoint, dependencies = {}) {
       }
       const database = dependencies.store ?? getStore();
       if (endpoint === 'data' && req.method === 'GET') {
+        if (req.query?.id !== undefined) {
+          const id = req.query.id;
+          if (Object.keys(req.query).length !== 1 || typeof id !== 'string' || !/^\d+$/.test(id)) return send(400, { error: 'Invalid activity ID.' });
+          const details = await database.activityRecords(id);
+          return details ? send(200, details) : send(404, { error: 'Activity not found.' });
+        }
         const value = req.query?.offset ?? '0';
         if (typeof value !== 'string' || !/^\d{1,8}$/.test(value)) return send(400, { error: 'Invalid offset.' });
         return send(200, await database.data(Number(value)));

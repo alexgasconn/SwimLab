@@ -1,5 +1,72 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { activityAnalysis, lengthTrend, lengthCorrelation } from './analytics.mjs';
+
+test('activity analysis computes measured length metrics, aligns HR and detects rests, gaps and stroke changes', () => {
+  const activity = { id: 'a', type: 'pool', distance: 125, poolLength: 25 };
+  const lengths = [
+    { sequence: 0, start: 0, duration: 25, active: true, distance: 25, strokes: 10, stroke: 'freestyle' },
+    { sequence: 1, start: 25, duration: 25, active: true, distance: 25, strokes: null, stroke: 'freestyle' },
+    { sequence: 2, start: 50, duration: 20, active: false, distance: 0, stroke: 'unknown' },
+    { sequence: 3, start: 70, duration: 30, active: true, distance: 25, strokes: 12, stroke: 'backstroke' },
+    { sequence: 4, start: 120, duration: 30, active: true, distance: 25, strokes: 0, stroke: 'backstroke' },
+    { sequence: 5, start: 150, duration: 25, active: true, distance: 25, strokes: 10, stroke: 'freestyle' },
+  ].map(l => ({ ...l, activityId: 'a' }));
+  const details = activityAnalysis(activity, [...lengths, { ...lengths[0], activityId: 'other' }],
+    [{ timestamp: 0, heartRate: 120 }, { timestamp: 20, heartRate: 140 }, { timestamp: 25, heartRate: 160 }, { timestamp: 55, heartRate: 100 }]);
+  assert.equal(details.origin, 0);
+  assert.deepEqual(details.intervals.map(i => [i.kind, i.start, i.duration]), [
+    ['swim', 0, 50], ['rest', 50, 20], ['swim', 70, 30], ['gap', 100, 20],
+    ['swim', 120, 30], ['swim', 150, 25],
+  ]);
+  assert.deepEqual(details.blocks.map(b => [b.stroke, b.distance]), [['freestyle', 50], ['backstroke', 25], ['backstroke', 25], ['freestyle', 25]]);
+  assert.equal(details.active[0].pace, 100);
+  assert.equal(details.active[0].swolf, 35);
+  assert.equal(details.active[0].dps, 2.5);
+  assert.equal(details.active[0].spm, 24);
+  assert.equal(details.active[0].lpm, 2.4);
+  assert.equal(details.active[0].heartRate, 130);
+  assert.equal(details.active[0].hrSamples, 2);
+  assert.equal(details.active[1].heartRate, 160);
+  assert.equal(details.active[1].swolf, null);
+  assert.equal(details.active[1].dps, null);
+  assert.equal(details.active[3].spl, 0);
+  assert.equal(details.active[3].dps, null);
+  assert.equal(details.active[3].swolf, 30);
+  assert.equal(details.active[4].heartRate, null);
+  assert.equal(details.rows[2].index, null);
+  assert.equal(details.hr.max, 160);
+});
+
+test('activity detail flags invalid timing and distance without synthesizing lengths or HR', () => {
+  const activity = { id: 'a', type: 'pool', distance: 100, heartRate: 150 };
+  const result = activityAnalysis(activity, [
+    { activityId: 'a', sequence: 0, active: true, start: null, duration: 20, distance: 25, strokes: 10 },
+    { activityId: 'a', sequence: 1, active: true, start: 40, duration: null, distance: 25 },
+  ]);
+  assert.equal(result.active.length, 1);
+  assert.equal(result.timed.length, 0);
+  assert.equal(result.origin, null);
+  assert.equal(result.hr.count, 0);
+  assert.equal(result.active[0].heartRate, null);
+  assert.equal(result.warnings.length, 3);
+  assert.equal(activityAnalysis({ id: 'ow', type: 'open_water' }).blocks.length, 0);
+});
+
+test('length trends require eight measured values and correlations require five varying paired observations', () => {
+  const rows = Array.from({ length: 8 }, (_, i) => ({ pace: 100 + i * 10, dps: 2 + i * 0.2 }));
+  const trend = lengthTrend(rows, 'pace');
+  assert.equal(trend.first, 105);
+  assert.equal(trend.last, 165);
+  assert.ok(Math.abs(trend.change - (165 / 105 - 1) * 100) < 1e-9);
+  assert.equal(lengthTrend(rows.slice(0, 7), 'pace').change, null);
+  const correlation = lengthCorrelation([...rows, { pace: null, dps: 1 }], 'dps', 'pace');
+  assert.equal(correlation.n, 8);
+  assert.ok(Math.abs(correlation.r - 1) < 1e-9);
+  assert.ok(Math.abs(correlation.slope - 50) < 1e-9);
+  assert.equal(lengthCorrelation(rows.slice(0, 4), 'dps', 'pace').r, null);
+  assert.equal(lengthCorrelation(rows.map(r => ({ ...r, dps: 2 })), 'dps', 'pace').r, null);
+});
 import { deriveMetrics, annotateOutliers, histogram, weeklyTrend, trainingHeatmap, personalBests, sessionRankings, swolfTrend, trainingSummary, strokeMix, sortSessions, filterLogbook } from './analytics.mjs';
 
 const activity = overrides => deriveMetrics({
@@ -56,6 +123,9 @@ test('records require exact FIT windows, include rests, and do not estimate from
   assert.equal(result['200m'][0].value, 275);
   assert.equal(result['200m'][0].pace, 137.5);
   assert.equal(result['50m freestyle'][0].pace, 130);
+  assert.equal(result.attempts['100m freestyle'], 2);
+  assert.equal(result.attempts['200m freestyle'], 1);
+  assert.equal(result.attempts['50m freestyle'], 4);
   assert.equal(result['100m'].length, 1);
   assert.equal(result['1000m'].length, 0);
   assert.equal(personalBests([a], [])['100m'].length, 0);
@@ -105,16 +175,29 @@ test('500m and 1000m records use exact lengths; 20m IM records are limited to 20
 
 test('every stroke has all requested distances and IM has only the requested distances', () => {
   const strokes = ['freestyle', 'breaststroke', 'backstroke', 'butterfly'];
-  const distances = [50, 100, 200, 400, 500, 750, 1000];
+  const distances = [50, 100, 150, 200, 250, 400, 500, 700, 750, 1000, 1500];
   const activities = strokes.map((_, i) => activity({ id: `stroke-${i}`, poolLength: 25 }));
   const lengths = strokes.flatMap((stroke, strokeIndex) =>
-    Array.from({ length: 40 }, (_, i) => ({
+    Array.from({ length: 60 }, (_, i) => ({
       activityId: `stroke-${strokeIndex}`, sequence: i, active: true, distance: 25,
       start: i * 31, duration: 30, stroke,
     })));
   const records = personalBests(activities, lengths, 1);
   for (const stroke of strokes) {
     for (const distance of distances) assert.equal(records[`${distance}m ${stroke}`].length, 1);
+  }
+
+  const shortPoolActivities = strokes.map((_, i) => activity({ id: `short-${i}`, poolLength: 20 }));
+  const shortPoolLengths = strokes.flatMap((stroke, strokeIndex) =>
+    Array.from({ length: 8 }, (_, i) => ({
+      activityId: `short-${strokeIndex}`, sequence: i, active: true, distance: 20,
+      start: i * 30, duration: 25, stroke,
+    })));
+  const shortPoolRecords = personalBests(shortPoolActivities, shortPoolLengths, 1);
+  for (const stroke of strokes) {
+    assert.equal(shortPoolRecords.attempts[`40m ${stroke}`], 4);
+    assert.equal(shortPoolRecords[`80m ${stroke}`].length, 1);
+    assert.equal(shortPoolRecords[`160m ${stroke}`].length, 1);
   }
 
   const imStrokes = ['butterfly', 'backstroke', 'breaststroke', 'freestyle'];
@@ -127,6 +210,18 @@ test('every stroke has all requested distances and IM has only the requested dis
   assert.equal(imRecords['100m IM'].length, 0);
   assert.equal(imRecords['200m IM'].length, 1);
   assert.equal(Object.hasOwn(imRecords, '400m IM'), false);
+});
+
+test('open-water podiums rank whole swims by distance and moving pace without FIT samples', () => {
+  const rows = [
+    activity({ id: 'pool', distance: 4000, movingTime: 2000 }),
+    activity({ id: 'long', type: 'open_water', distance: 2000, movingTime: 2400 }),
+    activity({ id: 'fast', type: 'open_water', distance: 1000, movingTime: 900 }),
+    activity({ id: 'short', type: 'open_water', distance: 80, movingTime: 40 }),
+  ];
+  const records = personalBests(rows, [], 2);
+  assert.deepEqual(records['Longest open water'].map(e => [e.id, e.value]), [['long', 2000], ['fast', 1000]]);
+  assert.deepEqual(records['Fastest open water'].map(e => [e.id, e.value]), [['fast', 90], ['long', 120]]);
 });
 
 test('podiums show three distinct sessions and fastest sessions have a minimum distance', () => {

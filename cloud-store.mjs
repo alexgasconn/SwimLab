@@ -19,6 +19,7 @@ export function createCloudStore(connectionString) {
         id TEXT PRIMARY KEY, source JSONB NOT NULL, raw TEXT NOT NULL,
         lengths JSONB NOT NULL DEFAULT '[]', route JSONB NOT NULL DEFAULT '[]'
       )`);
+      await client.query("ALTER TABLE swimlab_activities ADD COLUMN IF NOT EXISTS records JSONB NOT NULL DEFAULT '[]'");
       const result = await fn(client);
       await client.query('COMMIT');
       return result;
@@ -62,18 +63,19 @@ export function createCloudStore(connectionString) {
             if (existing && fingerprint && existing !== fingerprint) throw new Error('This database belongs to another Garmin account.');
             if (fingerprint) await setMeta(client, 'account', fingerprint);
             for (const activity of batch.activities) {
-              const prior = (await client.query('SELECT source, raw, lengths, route FROM swimlab_activities WHERE id=$1 FOR UPDATE', [activity.id])).rows[0];
+              const prior = (await client.query('SELECT source, raw, lengths, route, records FROM swimlab_activities WHERE id=$1 FOR UPDATE', [activity.id])).rows[0];
               const raw = JSON.stringify(activity.raw);
               const unchanged = prior && prior.raw === raw && prior.source.type === activity.type;
               const saved = { ...activity, review: prior?.source.review ?? null, fitStatus: unchanged ? prior.source.fitStatus : 'pending',
-                fitError: unchanged ? prior.source.fitError : null, routeStatus: unchanged ? prior.source.routeStatus : activity.type === 'pool' ? 'not_applicable' : 'pending' };
+                fitError: unchanged ? prior.source.fitError : null, routeStatus: unchanged ? prior.source.routeStatus : activity.type === 'pool' ? 'not_applicable' : 'pending',
+                recordsStatus: unchanged ? prior.source.recordsStatus ?? 'pending' : 'pending' };
               if (unchanged && prior.source.fitStatus === 'complete') {
                 for (const field of fitFields) saved[field] = prior.source[field] ?? null;
               }
               delete saved.raw;
-              await client.query(`INSERT INTO swimlab_activities(id,source,raw,lengths,route) VALUES($1,$2::jsonb,$3,$4::jsonb,$5::jsonb)
-                ON CONFLICT(id) DO UPDATE SET source=excluded.source,raw=excluded.raw,lengths=excluded.lengths,route=excluded.route`,
-              [activity.id, JSON.stringify(saved), raw, JSON.stringify(unchanged ? prior.lengths : []), JSON.stringify(unchanged ? prior.route : [])]);
+              await client.query(`INSERT INTO swimlab_activities(id,source,raw,lengths,route,records) VALUES($1,$2::jsonb,$3,$4::jsonb,$5::jsonb,$6::jsonb)
+                ON CONFLICT(id) DO UPDATE SET source=excluded.source,raw=excluded.raw,lengths=excluded.lengths,route=excluded.route,records=excluded.records`,
+              [activity.id, JSON.stringify(saved), raw, JSON.stringify(unchanged ? prior.lengths : []), JSON.stringify(unchanged ? prior.route : []), JSON.stringify(unchanged ? prior.records : [])]);
             }
             job.scanned += batch.scanned;
             job.page++;
@@ -81,6 +83,7 @@ export function createCloudStore(connectionString) {
               await setMeta(client, 'history', { scanned: job.scanned, truncated: batch.scanned === 100, syncedAt: new Date().toISOString() });
               const pending = await client.query(`SELECT id FROM swimlab_activities
                 WHERE source->>'fitStatus' IN ('pending','error') OR (source->>'type'='open_water' AND source->>'routeStatus'='pending')
+                  OR (source->>'fitStatus'='complete' AND COALESCE(source->>'recordsStatus','pending')='pending')
                 ORDER BY source->>'date' DESC NULLS LAST`);
               job.queue = pending.rows.map(row => row.id);
               job.total = job.queue.length;
@@ -99,10 +102,12 @@ export function createCloudStore(connectionString) {
               for (const field of fitFields) activity[field] = data.metrics[field] ?? null;
               activity.fitStatus = 'complete';
               activity.fitError = null;
+              const records = data.records ?? [];
+              activity.recordsStatus = records.length ? 'complete' : 'unavailable';
               const route = activity.type === 'open_water' ? data.routePoints : [];
               activity.routeStatus = activity.type === 'pool' ? 'not_applicable' : route.length >= 2 ? 'complete' : 'unavailable';
-              await client.query('UPDATE swimlab_activities SET source=$2::jsonb,lengths=$3::jsonb,route=$4::jsonb WHERE id=$1',
-                [id, JSON.stringify(activity), JSON.stringify(data.lengths), JSON.stringify(route)]);
+              await client.query('UPDATE swimlab_activities SET source=$2::jsonb,lengths=$3::jsonb,route=$4::jsonb,records=$5::jsonb WHERE id=$1',
+                [id, JSON.stringify(activity), JSON.stringify(data.lengths), JSON.stringify(route), JSON.stringify(records)]);
             } catch (error) {
               if (![204, 404].includes(error.status)) throw error;
               activity.fitStatus = 'unavailable';
@@ -137,6 +142,12 @@ export function createCloudStore(connectionString) {
         row.source.review = decision;
         await client.query('UPDATE swimlab_activities SET source=$2::jsonb WHERE id=$1', [id, JSON.stringify(row.source)]);
         return true;
+      });
+    },
+    async activityRecords(id) {
+      return transaction(async client => {
+        const row = (await client.query('SELECT source,records FROM swimlab_activities WHERE id=$1', [id])).rows[0];
+        return row ? { records: row.records, recordsStatus: row.source.recordsStatus ?? 'pending' } : null;
       });
     },
     async data(offset) {

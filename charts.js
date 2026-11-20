@@ -52,6 +52,67 @@ function tooltip(node, text) {
   node.append(element('title', {}, text));
 }
 
+export const strokeColors = { freestyle: '#54dbcb', backstroke: '#74c8ee', breaststroke: '#9eafff', butterfly: '#f5bc72' };
+export const strokeNames = { freestyle: 'Freestyle', backstroke: 'Backstroke', breaststroke: 'Breaststroke', butterfly: 'Butterfly' };
+
+export function metricChart(container, rows, options) {
+  const { xKey = 'index', yKey, xLabel = 'Active length', yLabel, format = number, xFormat = number,
+    scatter = false, maxGap = Infinity, regression = null, color = colors.pool } = options;
+  const valid = rows.filter(r => Number.isFinite(r[xKey]) && Number.isFinite(r[yKey]));
+  const svg = chart(container, `${yLabel} versus ${xLabel}. ${valid.length} recorded values.`, !valid.length);
+  if (!svg) return;
+  let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+  for (const r of valid) {
+    xMin = Math.min(xMin, r[xKey]); xMax = Math.max(xMax, r[xKey]);
+    yMin = Math.min(yMin, r[yKey]); yMax = Math.max(yMax, r[yKey]);
+  }
+  const xp = (xMax - xMin) * 0.04 || 0.5, yp = (yMax - yMin) * 0.12 || Math.max(1, Math.abs(yMin) * 0.05);
+  const { x, y } = axes(svg, Math.max(0, xMin - xp), xMax + xp, yMax + yp, xLabel, yLabel, xFormat, format, yMin - yp);
+  if (!scatter) {
+    let points = [], previousX = null;
+    const flush = () => {
+      if (points.length > 1) svg.append(element('polyline', { points: points.join(' '), fill: 'none', stroke: color, 'stroke-width': 2 }));
+      points = [];
+    };
+    for (const r of rows) {
+      if (!Number.isFinite(r[xKey]) || !Number.isFinite(r[yKey])) { flush(); previousX = null; continue; }
+      if (previousX != null && r[xKey] - previousX > maxGap) flush();
+      points.push(`${x(r[xKey])},${y(r[yKey])}`);
+      previousX = r[xKey];
+    }
+    flush();
+  }
+  if (regression?.slope != null) {
+    const points = [xMin, xMax].map(v => `${x(v)},${y(regression.slope * v + regression.intercept)}`).join(' ');
+    svg.append(element('polyline', { points, fill: 'none', stroke: colors.rolling, 'stroke-width': 2, 'stroke-dasharray': '6 5' }));
+  }
+  const stride = scatter ? 1 : Math.max(1, Math.ceil(valid.length / 250));
+  for (let i = 0; i < valid.length; i += stride) {
+    const r = valid[i];
+    const dot = element('circle', { cx: x(r[xKey]), cy: y(r[yKey]), r: scatter ? 4 : 3,
+      fill: strokeColors[r.stroke] ?? color, class: 'data-point' });
+    tooltip(dot, `${xLabel}: ${xFormat(r[xKey])} · ${yLabel}: ${format(r[yKey])}${r.index ? ` · length ${r.index}` : ''}`);
+    svg.append(dot);
+  }
+}
+
+export function lengthRibbon(container, rows, origin) {
+  const timed = rows.filter(r => Number.isFinite(r.start) && r.end != null);
+  const svg = chart(container, 'Recorded length timeline: active lengths by stroke above, recorded rest below. Blank intervals have no length record.', !timed.length);
+  if (!svg) return;
+  const end = timed.reduce((max, r) => Math.max(max, r.end), origin + 1);
+  const { x } = axes(svg, 0, (end - origin) / 60, 1, 'Minutes since first FIT timestamp', '', number, () => '');
+  svg.append(element('text', { x: margin.left, y: 40, class: 'axis-label' }, 'SWIM'));
+  svg.append(element('text', { x: margin.left, y: 140, class: 'axis-label' }, 'RECORDED REST'));
+  for (const row of timed) {
+    const rect = element('rect', { x: x((row.start - origin) / 60), y: row.active ? 52 : 152,
+      width: Math.max(0.5, x((row.end - origin) / 60) - x((row.start - origin) / 60)), height: row.active ? 65 : 25,
+      fill: row.active ? strokeColors[row.stroke] ?? '#78879a' : '#516072', rx: 2, class: 'length-segment' });
+    tooltip(rect, `${row.active ? `Length ${row.index} · ${strokeNames[row.stroke] ?? 'Unclassified'}` : 'Recorded rest'} · ${number(row.duration)} s${row.pace ? ` · ${paceLabel(row.pace)}/100 m · ${number(row.distance)} m` : ''}`);
+    svg.append(rect);
+  }
+}
+
 export function scatterplot(container, activities) {
   const rows = activities.filter(a => a.distance > 0 && a.pace > 0);
   const svg = chart(container, 'Moving pace versus session distance. Teal: pool. Violet: open water. Lower pace is faster.', !rows.length);
@@ -63,7 +124,9 @@ export function scatterplot(container, activities) {
   for (const a of rows) {
     const dot = element('circle', { cx: x(a.distance / 1000), cy: y(a.pace), r: 5, fill: colors[a.type], opacity: 0.8, class: 'data-point' });
     tooltip(dot, `${a.date?.slice(0, 10)} / ${a.name}: ${number(a.distance)} m, ${paceLabel(a.pace)}/100 m`);
-    svg.append(dot);
+    const link = element('a', { href: `#activity=${encodeURIComponent(a.id)}`, 'aria-label': `Analyze ${a.name}` });
+    link.append(dot);
+    svg.append(link);
   }
 }
 
@@ -122,7 +185,9 @@ export function swolfChart(container, activities) {
   for (const [index, a] of rows.entries()) {
     const dot = element('circle', { cx: x(dates[index]), cy: y(a.swolf), r: 4, fill: colors.open_water });
     tooltip(dot, `${a.date?.slice(0, 10)} / ${a.name}: SWOLF ${number(a.swolf)}`);
-    svg.append(dot);
+    const link = element('a', { href: `#activity=${encodeURIComponent(a.id)}`, 'aria-label': `Analyze ${a.name}` });
+    link.append(dot);
+    svg.append(link);
   }
 }
 
@@ -234,12 +299,14 @@ export function routeMap(container, activities, routePoints) {
     const line = element('polyline', { points: points.join(' '), fill: 'none', stroke: palette[index % palette.length],
       'stroke-width': 4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0.9 });
     tooltip(line, `${route.activity.date?.slice(0, 10)} / ${route.activity.name}: ${route.activity.distance > 0 ? number(route.activity.distance / 1000) + ' km' : 'distance unavailable'}`);
-    svg.append(line);
+    const link = element('a', { href: `#activity=${encodeURIComponent(route.activity.id)}`, 'aria-label': `Analyze ${route.activity.name}` });
+    link.append(line);
+    svg.append(link);
     for (const [point, label, fill] of [[route.points[0], 'Start', '#54dbcb'], [route.points.at(-1), 'Finish', '#f5bc72']]) {
       const [cx, cy] = position(point);
       const marker = element('circle', { cx, cy, r: 6, fill, stroke: '#0c1923', 'stroke-width': 2 });
       tooltip(marker, `${label} / ${route.activity.name}`);
-      svg.append(marker);
+      link.append(marker);
     }
   }
   svg.append(element('text', { x: 24, y: 25, class: 'axis-text' }, 'N'));

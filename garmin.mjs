@@ -133,6 +133,17 @@ export function extractFitMetrics(messages) {
     if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return [];
     return [{ sequence, lat, lon }];
   });
+  const records = (messages.recordMesgs ?? []).flatMap((record, sequence) => {
+    const timestamp = record.timestamp instanceof Date ? record.timestamp.getTime() / 1000 : null;
+    if (!Number.isFinite(timestamp)) return [];
+    return [{
+      sequence, timestamp, heartRate: positive(record.heartRate),
+      distance: nonnegative(record.distance),
+      speed: positive(record.enhancedSpeed) ?? positive(record.speed),
+      cadence: nonnegative(record.cadence),
+      temperature: typeof record.temperature === 'number' && Number.isFinite(record.temperature) ? record.temperature : null,
+    }];
+  });
   return {
     metrics: {
       poolLength,
@@ -140,7 +151,7 @@ export function extractFitMetrics(messages) {
       ...percentages,
     },
     lengths,
-    routePoints,
+    routePoints, records,
   };
 }
 

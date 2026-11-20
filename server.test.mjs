@@ -5,6 +5,10 @@ import { request } from 'node:http';
 import { createApp } from './server.mjs';
 import { connectGarmin, normalizeActivities, extractFitMetrics, decodeFit } from './garmin.mjs';
 import { openStore } from './store.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const source = overrides => ({
   activityId: 123, activityName: 'Pool technique', startTimeLocal: '2026-10-14 08:00:00',
@@ -98,6 +102,53 @@ test('FIT stroke proportions include unknown and drill lengths in the denominato
   assert.throws(() => decodeFit(new Uint8Array(20)), /integrity/);
 });
 
+test('FIT records retain timestamps, real HR, enhanced speed, zeros and missing values independently of GPS', () => {
+    const data = extractFitMetrics({
+      sessionMesgs: [{ sport: 'swimming' }],
+      recordMesgs: [
+        { timestamp: new Date(0), heartRate: 140, enhancedSpeed: 1.2, speed: 1, distance: 0, cadence: 0, temperature: 0 },
+        { timestamp: new Date(5000), heartRate: null, speed: 0.8, distance: 4 },
+        { timestamp: new Date(NaN), heartRate: 150 },
+        { heartRate: 160 },
+      ],
+    });
+    assert.deepEqual(data.records, [
+      { sequence: 0, timestamp: 0, heartRate: 140, distance: 0, speed: 1.2, cadence: 0, temperature: 0 },
+      { sequence: 1, timestamp: 5, heartRate: null, distance: 4, speed: 0.8, cadence: null, temperature: null },
+    ]);
+    assert.equal(data.routePoints.length, 0);
+  });
+
+test('SQLite migrates old FIT caches once and lazily returns sensor records without bulk-loading them', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'swimlab-records-'));
+    const path = join(directory, 'test.sqlite');
+    let store = openStore(path);
+    const record = { sequence: 0, timestamp: 100, heartRate: 140, distance: 0, speed: null, cadence: null, temperature: null };
+    try {
+      store.saveHistory(history([normalized()]));
+      store.saveFit('123', fit());
+      store.review('123', 'include');
+      store.close();
+      const legacy = new DatabaseSync(path);
+      legacy.exec('DROP TABLE activity_records; ALTER TABLE activities DROP COLUMN records_status');
+      legacy.close();
+      store = openStore(path);
+      assert.deepEqual(store.pending(), ['123']);
+      store.saveFit('123', { ...fit(), records: [record] });
+      assert.deepEqual(store.activityRecords('123'), { records: [record], recordsStatus: 'complete' });
+      assert.equal('records' in store.data(), false);
+      store.saveHistory(history([normalized()]));
+      assert.deepEqual(store.pending(), []);
+      assert.deepEqual(store.activityRecords('123').records, [record]);
+      store.saveHistory(history(normalizeActivities([source({ distance: 2000 })])));
+      assert.deepEqual(store.activityRecords('123'), { records: [], recordsStatus: 'pending' });
+      assert.equal(store.data().activities[0].review, 'include');
+      store.saveFit('123', fit());
+      assert.equal(store.activityRecords('123').recordsStatus, 'unavailable');
+      assert.deepEqual(store.pending(), []);
+      assert.equal(store.activityRecords('404'), null);
+    } finally { store.close(); rmSync(directory, { recursive: true }); }
+  });
 test('SQLite upserts, keeps reviews, caches FIT, invalidates changed measurements, and prevents account mixing', () => {
   const store = openStore(':memory:');
   try {
@@ -171,6 +222,9 @@ test('local server serves the offline map and its decoder without an external ti
     assert.equal(decoder.status, 200);
     assert.match(decoder.contentType, /text\/javascript/);
     assert.match((await get('/world-atlas-license.txt')).text, /Permission to use/);
+    assert.equal((await get('/activity.js')).status, 200);
+    assert.equal((await get('/api/data?id=invalid')).status, 400);
+    assert.equal((await get('/api/data?id=999')).status, 404);
   } finally {
     server.close();
     await once(server, 'close');

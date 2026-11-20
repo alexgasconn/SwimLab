@@ -59,6 +59,15 @@ export function createApp(fetcher = fetch, store = openStore()) {
     if (req.headers.host !== new URL(origin).host) { json(403, { error: 'Host not allowed. Use http://127.0.0.1:8787.' }); return; }
     try {
       if (req.method === 'GET' && req.url === '/api/data') { json(200, store.data()); return; }
+      if (req.method === 'GET' && req.url.startsWith('/api/data?')) {
+        const query = new URL(req.url, origin).searchParams;
+        const id = query.get('id');
+        if (query.size !== 1 || !id || !/^\d+$/.test(id)) { json(400, { error: 'Invalid activity ID.' }); return; }
+        const details = store.activityRecords(id);
+        if (!details) { json(404, { error: 'Activity not found.' }); return; }
+        json(200, details);
+        return;
+      }
       if (req.method === 'GET' && req.url === '/api/sync') { json(200, job); return; }
       if (req.method === 'POST' && ['/api/sync', '/api/review'].includes(req.url)) {
         if (req.headers.origin !== origin || req.headers['content-type'] !== 'application/json') {
@@ -92,6 +101,7 @@ export function createApp(fetcher = fetch, store = openStore()) {
         '/app.js': ['app.js', 'text/javascript'],
         '/charts.js': ['charts.js', 'text/javascript'],
         '/analytics.mjs': ['analytics.mjs', 'text/javascript'],
+        '/activity.js': ['activity.js', 'text/javascript'],
         '/style.css': ['style.css', 'text/css'],
         '/land-10m.json': ['node_modules/world-atlas/land-10m.json', 'application/json'],
         '/topojson-client.js': ['node_modules/topojson-client/dist/topojson-client.min.js', 'text/javascript'],

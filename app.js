@@ -1,5 +1,6 @@
 import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, trainingHeatmap, personalBests, sessionRankings, trainingSummary, strokeMix, sortSessions, filterLogbook } from './analytics.mjs';
 import { scatterplot, distribution, weeklyChart, heatmap, paceLabel, swolfChart, routeMap } from './charts.js';
+import { renderActivity } from './activity.js';
 
 const $ = id => document.getElementById(id);
 const cloud = document.documentElement.dataset.storage === 'cloud';
@@ -11,6 +12,9 @@ let logbookRows = [];
 let currentPoll = null;
 let tableSort = null;
 let recordGroup = 'freestyle';
+let activityRequest = 0;
+let activityOpenedFromDashboard = false;
+let activityReturnFocus = null;
 const format = (value, digits = 1) => value == null || !Number.isFinite(value) ? '--' : new Intl.NumberFormat('en', { maximumFractionDigits: digits }).format(value);
 const percent = value => value == null ? '--' : `${format(value, 1)}%`;
 const time = value => {
@@ -218,7 +222,10 @@ function renderRankings(entries, metric) {
     const rank = document.createElement('span');
     rank.className = 'rank';
     rank.textContent = String(index + 1).padStart(2, '0');
-    const details = document.createElement('div');
+    const details = document.createElement('a');
+    details.href = `#activity=${encodeURIComponent(entry.id)}`;
+    details.className = 'activity-link';
+    details.setAttribute('aria-label', `Analyze activity from ${entry.date?.slice(0, 10)}`);
     details.textContent = `${entry.date?.slice(0, 10)} / ${entry.type === 'pool' ? 'Pool' : 'Open water'}`;
     const pace = document.createElement('small');
     pace.textContent = `${paceLabel(entry.pace)} /100 m`;
@@ -239,6 +246,7 @@ function renderRecords(records) {
     butterfly: key => key.endsWith(' butterfly'),
     im: key => key.endsWith(' IM'),
     mixed: key => /^\d+m$/.test(key),
+    open_water: key => key.endsWith(' open water'),
     session: key => key.endsWith(' session'),
   };
   for (const [category, entries] of Object.entries(records).filter(([key]) => groups[recordGroup](key))) {
@@ -247,10 +255,17 @@ function renderRecords(records) {
     const heading = document.createElement('h3');
     heading.textContent = category.replace(/ (freestyle|breaststroke|backstroke|butterfly)$/, '');
     card.append(heading);
+    const attemptCount = records.attempts?.[category];
+    if (attemptCount != null) {
+      const attempts = document.createElement('small');
+      attempts.className = 'record-attempt-count';
+      attempts.textContent = `${attemptCount} ${attemptCount === 1 ? 'attempt' : 'attempts'}`;
+      card.append(attempts);
+    }
     if (!entries.length) {
       const empty = document.createElement('p');
       empty.className = 'record-empty';
-      empty.textContent = category.includes('session') ? 'No eligible sessions.' : 'No qualifying FIT lengths. No estimated record.';
+      empty.textContent = attemptCount == null ? 'No eligible sessions.' : 'No qualifying FIT lengths. No estimated record.';
       card.append(empty);
     }
     entries.forEach((entry, index) => {
@@ -259,14 +274,17 @@ function renderRecords(records) {
       const rank = document.createElement('span');
       rank.className = 'rank';
       rank.textContent = String(index + 1).padStart(2, '0');
-      const details = document.createElement('div');
+      const details = document.createElement('a');
+      details.href = `#activity=${encodeURIComponent(entry.id)}`;
+      details.className = 'activity-link';
+      details.setAttribute('aria-label', `Analyze activity from ${entry.date?.slice(0, 10)}`);
       details.textContent = entry.date?.slice(0, 10);
       const pace = document.createElement('small');
       pace.textContent = `${paceLabel(entry.pace)} /100 m`;
       details.append(pace);
       const value = document.createElement('strong');
-      value.textContent = category === 'Longest session' ? `${format(entry.value / 1000, 2)} km`
-        : category === 'Fastest session' ? `${paceLabel(entry.value)}/100` : paceLabel(entry.value);
+      value.textContent = category.startsWith('Longest ') ? `${format(entry.value / 1000, 2)} km`
+        : category.startsWith('Fastest ') ? `${paceLabel(entry.value)}/100` : paceLabel(entry.value);
       row.append(rank, details, value);
       card.append(row);
     });
@@ -298,9 +316,15 @@ function renderTable() {
   for (const a of sortedVisible()) {
     const row = document.createElement('tr');
     if (a.excluded) row.className = 'excluded';
-    for (const [, get] of columns) {
+    for (const [title, get] of columns) {
       const cell = document.createElement('td');
-      cell.textContent = get(a);
+      if (['ID', 'Local date', 'Activity'].includes(title)) {
+        const link = document.createElement('a');
+        link.href = `#activity=${encodeURIComponent(a.id)}`;
+        link.className = 'activity-link';
+        link.textContent = get(a);
+        cell.append(link);
+      } else cell.textContent = get(a);
       row.append(cell);
     }
     fragment.append(row);
@@ -443,6 +467,64 @@ function activateTab(tab, moveFocus = false) {
   }
   if (moveFocus) tab.focus();
 }
+function closeActivity() {
+  if (activityOpenedFromDashboard) history.back();
+  else location.hash = '';
+}
+async function showActivity() {
+  const request = ++activityRequest;
+  const match = /^#activity=(\d+)$/.exec(location.hash);
+  const isActivity = location.hash.startsWith('#activity=');
+  document.body.classList.toggle('activity-mode', isActivity);
+  $('activity-detail').hidden = !isActivity;
+  if (!isActivity) {
+    activateTab(tabs.find(tab => tab.getAttribute('aria-selected') === 'true') ?? tabs[0]);
+    document.title = 'SWIMLAB / Personal swim analytics';
+    if (activityReturnFocus?.isConnected) activityReturnFocus.focus({ preventScroll: true });
+    return;
+  }
+  for (const tab of tabs) $(tab.getAttribute('aria-controls')).hidden = true;
+  const container = $('activity-detail');
+  container.replaceChildren();
+  const back = document.createElement('button');
+  back.className = 'secondary';
+  back.textContent = '← Back to dashboard';
+  back.addEventListener('click', closeActivity);
+  const message = document.createElement('p');
+  message.className = 'hint';
+  container.append(back, message);
+  const activity = match ? annotateOutliers(dataset.activities).find(a => a.id === match[1]) : null;
+  if (!activity) {
+    message.textContent = match ? 'Activity not found in the loaded history. Return to the dashboard and load saved data or sync Garmin.' : 'Invalid activity link.';
+    message.setAttribute('role', 'alert');
+    document.title = 'SWIMLAB / Activity not found';
+    return;
+  }
+  document.title = `SWIMLAB / ${activity.name}`;
+  message.textContent = 'Loading recorded sensor data…';
+  let records;
+  try {
+    records = demo ? { records: (dataset.records ?? []).filter(r => r.activityId === activity.id), recordsStatus: 'complete' }
+      : await api(`/api/data?id=${encodeURIComponent(activity.id)}`);
+  } catch (error) {
+    records = { records: [], recordsStatus: activity.recordsStatus, error: error.message };
+  }
+  if (request !== activityRequest) return;
+  try {
+    renderActivity(container, activity, dataset, records, { demo, onBack: closeActivity });
+  } catch (error) {
+    message.textContent = `Activity analysis failed: ${error.message}`;
+    message.setAttribute('role', 'alert');
+    container.replaceChildren(back, message);
+  }
+}
+addEventListener('hashchange', event => {
+  if (!new URL(event.oldURL).hash.startsWith('#activity=') && location.hash.startsWith('#activity=')) {
+    activityOpenedFromDashboard = true;
+    activityReturnFocus = document.activeElement;
+  }
+  void showActivity();
+});
 for (const tab of tabs) {
   tab.addEventListener('click', () => activateTab(tab));
   tab.addEventListener('keydown', event => {
@@ -485,6 +567,7 @@ async function loadSaved() {
   dataset = await fetchDataset();
   demo = false;
   render();
+  await showActivity();
 }
 async function fetchDataset() {
   const data = await api('/api/data');
@@ -550,7 +633,7 @@ $('export').addEventListener('click', () => {
 $('demo').addEventListener('click', () => {
   demo = true;
   $('key').value = '';
-  dataset = { activities: [], lengths: [], routePoints: [], history: null };
+  dataset = { activities: [], lengths: [], routePoints: [], records: [], history: null };
   for (let i = 0; i < 72; i++) {
     const date = new Date();
     date.setDate(date.getDate() - i * 3);
@@ -572,6 +655,13 @@ $('demo').addEventListener('click', () => {
       butterflyPct: open ? null : 25, otherPct: open ? null : 0,
     });
     dataset.activities.push(activity);
+    for (let seconds = 0, sequence = 0; seconds <= activity.elapsedTime; seconds += 5, sequence++) {
+      dataset.records.push({ activityId: id, sequence, timestamp: date.getTime() / 1000 + seconds,
+        heartRate: Math.round(activity.heartRate + Math.sin(seconds / 70) * 8 + seconds / activity.elapsedTime * 5),
+        distance: open ? distance * seconds / activity.elapsedTime : null,
+        speed: open ? distance / activity.elapsedTime * (1 + Math.sin(seconds / 90) * 0.1) : null,
+        cadence: null, temperature: open ? 21 + Math.sin(seconds / 600) : null });
+    }
     if (open) {
       for (let point = 0; point < 18; point++) dataset.routePoints.push({
         activityId: id, sequence: point, lat: 0.02 + point * 0.0004,
@@ -580,11 +670,21 @@ $('demo').addEventListener('click', () => {
     }
     if (!open) {
       const perLength = movingTime / count;
-      for (let j = 0; j < count; j++) dataset.lengths.push({
-        activityId: id, sequence: j, active: true, start: date.getTime() / 1000 + j * (perLength + 1),
-        duration: perLength, distance: 25, strokes: 12,
-        stroke: ['butterfly', 'backstroke', 'breaststroke', 'freestyle'][Math.floor(j / (i % 2 ? 2 : 1)) % 4],
-      });
+      let start = date.getTime() / 1000, sequence = 0;
+      for (let j = 0; j < count; j++) {
+        const duration = perLength * (1 + (j / (count - 1) - 0.5) * 0.14 + Math.sin(j * 0.8) * 0.025);
+        dataset.lengths.push({
+          activityId: id, sequence: sequence++, active: true, start, duration, timerTime: duration,
+          distance: 25, strokes: Math.round(12 + Math.sin(j * 0.6) * 2 + j / (count - 1) * 2),
+          stroke: ['butterfly', 'backstroke', 'breaststroke', 'freestyle'][Math.floor(j / 2) % 4],
+        });
+        start += duration;
+        if ((j + 1) % 8 === 0) {
+          dataset.lengths.push({ activityId: id, sequence: sequence++, active: false, start, duration: 30,
+            timerTime: 30, distance: 0, strokes: 0, stroke: 'unknown' });
+          start += 30;
+        } else start += 1;
+      }
     }
   }
   const bad = { ...dataset.activities[1], id: '999999', name: 'Suspect sensor reading / review me', movingTime: 50, review: null };
@@ -595,6 +695,7 @@ $('demo').addEventListener('click', () => {
   $('from-label').hidden = true;
   $('to-label').hidden = true;
   render();
+  void showActivity();
   status('Demo loaded: synthetic data only. Storage has not been changed.');
 });
 
