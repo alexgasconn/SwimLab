@@ -18,6 +18,8 @@ SQLite is experimental in Node 22 and may print a warning.
 
 ## Dashboard
 
+SwimLab opens directly on the swim dashboard and syncs swimming activities only.
+
 - Separate Overview, Performance, Training patterns, Open-water routes, Personal bests
   and Swim logbook tabs. Filters are shared across analytics tabs.
 - Moving pace vs distance scatterplot; pace and distance histograms.
