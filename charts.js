@@ -148,25 +148,38 @@ export function distribution(container, values, isPace) {
   }
 }
 
-export function weeklyChart(container, weeks) {
-  const svg = chart(container, 'Weekly swim distance and trailing four-week mean. Weeks without sessions count as zero.', !weeks.length);
+export function weeklyChart(container, weeks, label, { distance = false, format = number } = {}) {
+  const values = weeks.flatMap(w => [w.value, w.rolling]).filter(v => v != null);
+  const svg = chart(container, `Weekly ${label} and trailing four-week mean`, !values.length);
   if (!svg) return;
-  const max = Math.max(1, ...weeks.map(w => w.km)) * 1.15;
-  const { x, y } = axes(svg, -0.5, Math.max(0.5, weeks.length - 0.5), max, 'Week starting Monday', 'Distance (km)',
-    value => weeks[Math.max(0, Math.min(weeks.length - 1, Math.round(value)))]?.date.slice(5) ?? '');
+  const max = Math.max(...values);
+  const min = distance ? 0 : Math.min(...values);
+  const padding = (max - min || max || 1) * 0.15;
+  const { x, y } = axes(svg, -0.5, Math.max(0.5, weeks.length - 0.5), max + padding, 'Week starting Monday', label,
+    value => weeks[Math.max(0, Math.min(weeks.length - 1, Math.round(value)))]?.date.slice(5) ?? '',
+    format, distance ? 0 : Math.max(0, min - padding));
   const barWidth = Math.max(1, plotW / weeks.length * 0.7);
-  for (const [index, week] of weeks.entries()) {
-    const bar = element('rect', { x: x(index) - barWidth / 2, y: y(week.km), width: barWidth, height: y(0) - y(week.km), fill: colors.weekly, rx: 2 });
-    tooltip(bar, `${week.date}${week.partial ? ' (current, incomplete week)' : ''}: ${number(week.km)} km; 4-week mean ${week.rolling == null ? 'not yet available' : number(week.rolling) + ' km'}`);
-    svg.append(bar);
-  }
-  const points = weeks.map((week, index) => week.rolling == null ? null : `${x(index)},${y(week.rolling)}`).filter(Boolean);
-  if (points.length) svg.append(element('polyline', { points: points.join(' '), fill: 'none', stroke: colors.rolling, 'stroke-width': 3 }));
-  for (const [index, week] of weeks.entries()) {
-    if (week.rolling == null) continue;
-    const dot = element('circle', { cx: x(index), cy: y(week.rolling), r: 3, fill: colors.rolling });
-    tooltip(dot, `${week.date}: trailing 4-week mean ${number(week.rolling)} km`);
-    svg.append(dot);
+  for (const [key, color] of [['value', colors.weekly], ['rolling', colors.rolling]]) {
+    let path = '', connected = false;
+    for (const [index, week] of weeks.entries()) {
+      const value = week[key];
+      if (value == null) { connected = false; continue; }
+      path += `${connected ? 'L' : 'M'}${x(index)},${y(value)} `;
+      connected = true;
+    }
+    if (path && !(key === 'value' && distance)) {
+      svg.append(element('path', { d: path, fill: 'none', stroke: color, 'stroke-width': 2.5 }));
+    }
+    for (const [index, week] of weeks.entries()) {
+      const value = week[key];
+      if (value == null) continue;
+      const mark = key === 'value' && distance
+        ? element('rect', { x: x(index) - barWidth / 2, y: Math.min(y(value), y(0) - 1),
+          width: barWidth, height: Math.max(1, y(0) - y(value)), fill: color, rx: 2 })
+        : element('circle', { cx: x(index), cy: y(value), r: key === 'value' ? 4 : 3, fill: color });
+      tooltip(mark, `${week.date}${week.partial ? ' (current, incomplete week)' : ''}: ${key === 'value' ? 'weekly' : '4-week mean'} ${format(value)} — ${label}`);
+      svg.append(mark);
+    }
   }
 }
 

@@ -162,13 +162,32 @@ function monday(date) {
   return result;
 }
 
-export function weeklyTrend(activities, now = new Date()) {
+export const weeklyMetrics = {
+  distance: { label: 'Distance (km)', value: a => a.distance / 1000 },
+  pace: { label: 'Pace (/100 m)', value: a => positive(a.pace) },
+  dps: { label: 'DPS (m/stroke)', value: a => positive(a.dps) },
+  spl: { label: 'SPL (strokes/length)', value: a => positive(a.spl) },
+  swolf: { label: 'SWOLF', value: a => positive(a.swolf) },
+  tpl: { label: 'TPL (s/length)', value: a => positive(a.tpl) },
+  efficiency: { label: 'Efficiency (swim index)', value: a => positive(a.pace) && positive(a.dps) ? 100 / a.pace * a.dps : null },
+  spm: { label: 'SPM (strokes/min)', value: a => positive(a.spm) },
+};
+
+export function weeklyTrend(activities, now = new Date(), metric = 'distance') {
   const valid = activities.filter(a => !Number.isNaN(localDate(a.date).getTime()) && a.distance > 0);
   if (!valid.length) return [];
+  const isDistance = metric === 'distance';
+  const definition = weeklyMetrics[metric];
   const totals = new Map();
   for (const a of valid) {
+    if (!isDistance && metric !== 'pace' && a.type !== 'pool') continue;
+    const value = definition.value(a);
+    if (value == null) continue;
     const key = dateKey(monday(localDate(a.date)));
-    totals.set(key, (totals.get(key) ?? 0) + a.distance / 1000);
+    const bucket = totals.get(key) ?? { sum: 0, count: 0 };
+    bucket.sum += value;
+    bucket.count++;
+    totals.set(key, bucket);
   }
   const first = monday(new Date(Math.min(...valid.map(a => localDate(a.date).getTime()))));
   const last = monday(new Date(Math.max(now.getTime(), ...valid.map(a => localDate(a.date).getTime()))));
@@ -177,9 +196,13 @@ export function weeklyTrend(activities, now = new Date()) {
   const weeks = [];
   for (const cursor = first; cursor <= last; cursor.setDate(cursor.getDate() + 7)) {
     const key = dateKey(cursor);
-    const km = totals.get(key) ?? 0;
-    weeks.push({ date: key, km, rolling: null, partial: key === dateKey(monday(now)) });
-    if (weeks.length >= 4) weeks.at(-1).rolling = weeks.slice(-4).reduce((sum, w) => sum + w.km, 0) / 4;
+    const bucket = totals.get(key);
+    const value = isDistance ? bucket?.sum ?? 0 : bucket ? bucket.sum / bucket.count : null;
+    weeks.push({ date: key, value, rolling: null, partial: key === dateKey(monday(now)) });
+    if (weeks.length >= 4) {
+      const recent = weeks.slice(-4).map(w => w.value).filter(v => v != null);
+      weeks.at(-1).rolling = divide(recent.reduce((sum, v) => sum + v, 0), recent.length);
+    }
   }
   return weeks;
 }
@@ -237,7 +260,7 @@ export function filterLogbook(activities, { minDistance = null, maxDistance = nu
 }
 
 const strokeOrder = ['butterfly', 'backstroke', 'breaststroke', 'freestyle'];
-const strokeDistances = [40, 50, 80, 100, 150, 160, 200, 250, 400, 500, 700, 750, 1000, 1500];
+const strokeDistances = [40, 50, 80, 100, 150, 160, 200, 250, 400, 500, 700, 750, 800, 1000, 1500];
 const categories = [
   { key: '100m', distance: 100 }, { key: '200m', distance: 200 },
   { key: '500m', distance: 500 }, { key: '1000m', distance: 1000 },

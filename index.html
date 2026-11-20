@@ -66,7 +66,18 @@
       <div class="section-heading"><div><p class="eyebrow">01 / PERFORMANCE</p><h2>The shape of your swimming</h2></div><span class="legend"><i class="teal"></i>Pool <i class="violet"></i>Open water</span></div>
       <div class="chart-grid">
         <article class="panel"><div class="panel-heading"><h3>Pace vs distance</h3><span>SESSION SCATTER</span></div><p class="chart-note">Each dot is a session. Lower pace = faster swimming.</p><div id="scatter" class="chart"></div></article>
-        <article class="panel"><div class="panel-heading"><h3>Weekly volume</h3><span>CONSISTENCY</span></div><p class="chart-note"><i class="legend-line"></i>Trailing 4-week mean, including zero weeks. Monday-Sunday weeks intersecting your range; current week is incomplete.</p><div id="weekly" class="chart"></div></article>
+        <article class="panel">
+          <div class="panel-heading"><h3>Weekly swim trends</h3>
+            <label>Metric <select id="weekly-metric">
+              <option value="distance">Distance</option><option value="pace">Pace</option>
+              <option value="dps">DPS</option><option value="spl">SPL</option>
+              <option value="swolf">SWOLF</option><option value="tpl">TPL</option>
+              <option value="efficiency">Efficiency</option><option value="spm">SPM</option>
+            </select></label>
+          </div>
+          <p class="chart-note"><i class="legend-line"></i>Trailing 4-week mean. Weeks start on Monday; the current week is incomplete.</p>
+          <p id="weekly-method" class="chart-note"></p><div id="weekly" class="chart"></div>
+        </article>
         <article class="panel"><div class="panel-heading"><h3>Distance distribution</h3><span>SESSION SIZE</span></div><div id="distance-hist" class="chart"></div></article>
         <article class="panel"><div class="panel-heading"><h3>Pace distribution</h3><span>SWIMMING SPEED</span></div><div id="pace-hist" class="chart"></div></article>
         <article class="panel"><div class="panel-heading"><h3>SWOLF over time</h3><span>SESSION AVERAGE</span></div><p class="chart-note">Lower can be more efficient, but compare similar pool lengths and session types.</p><div id="swolf-chart" class="chart"></div></article>

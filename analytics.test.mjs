@@ -104,13 +104,29 @@ test('histograms include maxima, ignore nulls, and handle identical values', () 
 test('weekly mean includes zero weeks and heatmap uses local weekday and hour', () => {
   const rows = [activity({ distance: 2000 }), activity({ date: '2026-11-02T18:00:00', distance: 6000 })];
   const trend = weeklyTrend(rows, new Date('2026-11-08T12:00:00'));
-  assert.deepEqual(trend.map(w => w.km), [2, 0, 0, 6]);
+  assert.deepEqual(trend.map(w => w.value), [2, 0, 0, 6]);
   assert.equal(trend[0].rolling, null);
   assert.equal(trend[3].rolling, 2);
   const cells = trainingHeatmap(rows);
   assert.equal(cells[0][8], 1);
   assert.equal(cells[0][18], 1);
   assert.equal(cells.flat().reduce((s, count) => s + count, 0), 2);
+});
+
+test('weekly technique ignores missing measurements and open water; swim index uses speed times DPS', () => {
+  const rows = [
+    activity({ date: '2026-10-12', distance: 1000, movingTime: 1000, strokes: 500, swolf: 40 }),
+    activity({ date: '2026-10-13', distance: 1000, movingTime: 2000, strokes: 500, swolf: null }),
+    activity({ date: '2026-10-19', type: 'open_water', distance: 1000, movingTime: 1000, strokes: 100, swolf: 80 }),
+    activity({ date: '2026-11-02', distance: 1000, movingTime: 1000, strokes: 250, swolf: 44 }),
+  ];
+  const now = new Date('2026-11-08T12:00:00');
+  const index = weeklyTrend(rows, now, 'efficiency');
+  assert.deepEqual(index.map(w => w.value), [1.5, null, null, 4]);
+  assert.equal(index[3].rolling, 2.75);
+  assert.equal(index[3].partial, true);
+  assert.deepEqual(weeklyTrend(rows, now, 'swolf').map(w => w.value), [40, null, null, 44]);
+  assert.deepEqual(weeklyTrend(rows, now, 'pace').map(w => w.value), [150, 100, null, 100]);
 });
 
 test('records require exact FIT windows, include rests, and do not estimate from session averages', () => {
@@ -175,7 +191,7 @@ test('500m and 1000m records use exact lengths; 20m IM records are limited to 20
 
 test('every stroke has all requested distances and IM has only the requested distances', () => {
   const strokes = ['freestyle', 'breaststroke', 'backstroke', 'butterfly'];
-  const distances = [50, 100, 150, 200, 250, 400, 500, 700, 750, 1000, 1500];
+  const distances = [50, 100, 150, 200, 250, 400, 500, 700, 750, 800, 1000, 1500];
   const activities = strokes.map((_, i) => activity({ id: `stroke-${i}`, poolLength: 25 }));
   const lengths = strokes.flatMap((stroke, strokeIndex) =>
     Array.from({ length: 60 }, (_, i) => ({

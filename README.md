@@ -23,15 +23,18 @@ SQLite is experimental in Node 22 and may print a warning.
 - Moving pace vs distance scatterplot; pace and distance histograms.
 - Session SWOLF trend and pool / open-water summaries, including counts, session
   share, average distance and pace, and pool-length breakdowns.
-- Weekly distance and trailing four-week mean, **including empty weeks**.
-  Monday-Sunday weeks intersecting the selected date range are displayed;
-  the mean can use earlier weeks outside the view. Four weeks are required.
+- Weekly trends for distance, pace, DPS, SPL, SWOLF, TPL, efficiency and SPM.
+  Distance is a weekly total and includes empty weeks as zero. Other metrics
+  average measured sessions in each week; their trailing four-week means skip
+  missing weeks. Technique uses pool sessions only. Efficiency is the swim index
+  (moving speed in m/s × DPS in m/stroke). Weeks start on Monday, and the mean
+  can use earlier weeks outside the selected date range. Four weeks are required.
   The current week is incomplete and is labelled in chart tooltips.
 - Monday-Sunday x 24-hour heatmap: counts **session starts** in Garmin's local
   start time, not the computer's conversion of GPS timestamps or hours swum.
 - Pool / open-water, date-range and excluded-session filters affect the dashboard.
 - Configurable top 3/5/10 rankings by distance, pace or SWOLF. Exact-length
-  40/50/80/100/150/160/200/250/400/500/700/750/1000/1500 m efforts by stroke, 100/200/500/1000 m
+  40/50/80/100/150/160/200/250/400/500/700/750/800/1000/1500 m efforts by stroke, 100/200/500/1000 m
   efforts, 80/160 m IM efforts for 20 m pools, 100/200 m IM efforts, and
   longest / fastest sessions use the current filtered view. Use the stroke
   selector to explore each group independently.

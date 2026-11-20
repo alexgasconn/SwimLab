@@ -1,4 +1,4 @@
-import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, trainingHeatmap, personalBests, sessionRankings, trainingSummary, strokeMix, sortSessions, filterLogbook } from './analytics.mjs';
+import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, weeklyMetrics, trainingHeatmap, personalBests, sessionRankings, trainingSummary, strokeMix, sortSessions, filterLogbook } from './analytics.mjs';
 import { scatterplot, distribution, weeklyChart, heatmap, paceLabel, swolfChart, routeMap } from './charts.js';
 import { renderActivity } from './activity.js';
 
@@ -119,15 +119,7 @@ function render() {
   scatterplot($('scatter'), visible);
   distribution($('distance-hist'), visible.map(a => a.distance == null ? null : a.distance / 1000), false);
   distribution($('pace-hist'), visible.map(a => a.pace), true);
-  const weeklyScope = scope.filter(a => (include || !a.excluded) && localDate(a.date) <= to);
-  let weeks = weeklyTrend(weeklyScope);
-  if (from) {
-    const firstMonday = new Date(from);
-    firstMonday.setDate(firstMonday.getDate() - (firstMonday.getDay() + 6) % 7);
-    weeks = weeks.filter(w => w.date >= dateKey(firstMonday));
-  }
-  weeks = weeks.filter(w => w.date <= dateKey(to));
-  weeklyChart($('weekly'), weeks);
+  renderWeekly(scope.filter(a => (include || !a.excluded) && localDate(a.date) <= to), from, to);
   heatmap($('heatmap'), trainingHeatmap(visible));
   swolfChart($('swolf-chart'), visible);
   renderSummary(trainingSummary(visible));
@@ -145,6 +137,20 @@ function render() {
   renderQuality(dated);
   renderWarnings();
 }
+function renderWeekly(scope, from, to) {
+  const metric = $('weekly-metric').value;
+  const distance = metric === 'distance';
+  const firstMonday = from ? new Date(from) : null;
+  if (firstMonday) firstMonday.setDate(firstMonday.getDate() - (firstMonday.getDay() + 6) % 7);
+  const first = firstMonday ? dateKey(firstMonday) : null;
+  const weeks = weeklyTrend(scope, new Date(), metric)
+    .filter(w => (!first || w.date >= first) && w.date <= dateKey(to));
+  $('weekly-method').textContent = distance ? 'Weekly total; weeks without swims count as zero.'
+    : `${metric === 'pace' ? 'Pool and open-water' : 'Pool-only'} session averages; weeks without measurements are skipped.${metric === 'efficiency' ? ' Swim index = moving speed (m/s) × distance per stroke (m/stroke).' : ''}`;
+  weeklyChart($('weekly'), weeks, weeklyMetrics[metric].label, { distance, format: metric === 'pace' ? paceLabel : undefined });
+}
+$('weekly-metric').addEventListener('change', safeRender);
+
 function renderStrokeMix(mix) {
   $('stroke-coverage').textContent = mix.total
     ? `${format(mix.total / 1000, 2)} km of recorded active lengths across ${mix.sessions} of ${mix.poolSessions} pool sessions. Unclassified lengths remain in the denominator; open water and sessions without lengths are not included.`
