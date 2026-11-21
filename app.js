@@ -1,4 +1,4 @@
-import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, weeklyMetrics, trainingHeatmap, personalBests, recordDistanceGroups, openWaterRecordDistances, trainingSummary, strokeMix, sortSessions, filterLogbook, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory } from './analytics.mjs';
+import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, weeklyMetrics, trainingHeatmap, personalBests, recordDistanceGroups, openWaterRecordDistances, trainingSummary, strokeMix, sortSessions, filterLogbook, hideShortSessions, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory } from './analytics.mjs';
 import { scatterplot, distribution, weeklyChart, heatmap, paceLabel, swolfChart, routeMap } from './charts.js';
 import { renderActivity } from './activity.js';
 
@@ -43,8 +43,6 @@ const columns = [
   ['Max temp (C)', a => format(a.maxTemperature)],
   ['Free %', a => percent(a.freestylePct)], ['Breast %', a => percent(a.breaststrokePct)],
   ['Back %', a => percent(a.backstrokePct)], ['Fly %', a => percent(a.butterflyPct)],
-  ['FIT', a => a.fitStatus ?? 'pending'], ['Excluded', a => a.excluded ? 'Yes' : 'No'],
-  ['Quality flags', a => a.reasons.join('; ')], ['Review', a => a.review ?? 'Automatic'],
 ];
 const sortFields = [
   a => a.id, a => localDate(a.date).getTime(), a => a.name, a => (localDate(a.date).getDay() + 6) % 7,
@@ -53,7 +51,6 @@ const sortFields = [
   a => a.spm, a => a.spl, a => a.dps, a => a.tpl, a => a.lpm, a => a.swolf,
   a => a.temperature, a => a.minTemperature, a => a.maxTemperature,
   a => a.freestylePct, a => a.breaststrokePct, a => a.backstrokePct, a => a.butterflyPct,
-  a => a.fitStatus ?? 'pending', a => a.excluded ? 'Yes' : 'No', a => a.reasons.join('; '), a => a.review ?? 'Automatic',
 ];
 const strokeLabels = { freestyle: 'Freestyle', breaststroke: 'Breaststroke', backstroke: 'Backstroke', butterfly: 'Butterfly' };
 function status(message, error = false) {
@@ -860,6 +857,14 @@ async function fetchDataset() {
     data.routePoints.push(...page.routePoints);
     data.nextOffset = page.nextOffset;
   }
+  return dashboardDataset(data);
+}
+function dashboardDataset(data) {
+  data.activities = hideShortSessions(data.activities);
+  const ids = new Set(data.activities.map(a => a.id));
+  for (const field of ['lengths', 'routePoints', 'records']) {
+    if (data[field]) data[field] = data[field].filter(row => ids.has(row.activityId));
+  }
   return data;
 }
 async function pollSync() {
@@ -971,6 +976,7 @@ $('demo').addEventListener('click', () => {
   }
   const bad = { ...dataset.activities[1], id: '999999', name: 'Suspect sensor reading / review me', movingTime: 50, review: null };
   dataset.activities.push(deriveMetrics(bad));
+  dataset = dashboardDataset(dataset);
   $('period').value = 'all';
   $('environment').value = 'all';
   $('outliers').checked = false;

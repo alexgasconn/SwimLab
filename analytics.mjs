@@ -262,6 +262,10 @@ export function sortSessions(activities, getValue, direction = 'ascending') {
   });
 }
 
+export function hideShortSessions(activities) {
+  return activities.filter(a => a.distance == null || a.distance >= 500);
+}
+
 export function filterLogbook(activities, { minDistance = null, maxDistance = null, pool = 'all' }) {
   return activities.filter(a => {
     if ((minDistance != null || maxDistance != null) && !Number.isFinite(a.distance)) return false;

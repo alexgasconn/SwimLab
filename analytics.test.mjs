@@ -344,6 +344,18 @@ test('session sorting uses raw numbers and keeps missing values last in both dir
   assert.deepEqual(rows.map(a => a.id), ['a', 'b', 'c', 'd']);
 });
 
+test('dashboard hides swims below 500m, preserving the boundary and unknown distances', async () => {
+  const { hideShortSessions } = await import('./analytics.mjs');
+  const rows = [
+    activity({ id: 'short', distance: 499.99 }),
+    activity({ id: 'boundary', distance: 500 }),
+    activity({ id: 'open', type: 'open_water', distance: 400 }),
+    activity({ id: 'unknown', distance: null }),
+  ];
+  assert.deepEqual(hideShortSessions(rows).map(a => a.id), ['boundary', 'unknown']);
+  assert.equal(rows.length, 4);
+});
+
 test('logbook filters combine inclusive distance bounds with exact pool length or environment', () => {
   const rows = [
     activity({ id: 'a', distance: 1000, poolLength: 25 }),

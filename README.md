@@ -20,6 +20,9 @@ SQLite is experimental in Node 22 and may print a warning.
 ## Dashboard
 
 SwimLab opens directly on the swim dashboard and syncs swimming activities only.
+Sessions with a recorded distance below 500 m are hidden throughout the app,
+including records and Oceanman, without deleting stored activities. Sessions
+with an unknown distance remain available for data-quality review.
 
 - Separate Overview, Performance, Training patterns, Open-water routes, Personal bests,
   Swim logbook and Oceanman 14K tabs.
@@ -57,7 +60,8 @@ SwimLab opens directly on the swim dashboard and syncs swimming activities only.
   records. All routes in the current view are drawn together with start/finish
   markers on the approximate offline Natural Earth coastline map. It has no streets or local
   detail, is not suitable for navigation and loads no external map tiles.
-- Full metric logbook with sortable columns and distance / pool-length filters.
+- Full metric logbook with sortable columns and distance / pool-length filters;
+  FIT status, exclusion flags and review controls remain outside the table.
   These filters also apply to CSV export, but not the other dashboard views.
   Reversible per-session review and import warnings remain available.
 - Oceanman tab with the supplied 35-week plan, weekday distance, swim-distance

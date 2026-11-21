@@ -47,6 +47,7 @@
       <p class="hint" id="connection-note">Sync saves activity metrics, pool lengths and available open-water GPS points to a local SQLite database outside OneDrive. No account password, API keys or tokens are stored. Existing FIT files are cached; failed imports retry on the next sync.</p>
       <progress id="progress" max="1" value="0" hidden aria-label="FIT import progress"></progress>
     </details>
+    <p class="hint">Sessions shorter than 500 m are hidden throughout the dashboard, not deleted from storage.</p>
     <p id="coverage" class="hint">No activities loaded.</p>
     <section class="cards" aria-label="Training summary">
       <article><span>Total distance</span><strong id="distance">--</strong><small id="distance-note">kilometres</small></article>
