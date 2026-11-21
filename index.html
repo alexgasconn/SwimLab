@@ -1,24 +1,20 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <title>SWIMLAB / Personal swim analytics</title>
+  <meta name="color-scheme" content="light dark">
+  <title>GARMIN LAB / Personal analytics</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
   <script defer src="/topojson-client.js"></script>
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <aside class="sidebar">
-    <div class="brand"><span class="brand-icon">~</span> SWIMLAB<span class="brand-dot">.</span></div>
-    <div class="sidebar-note"><span class="live-dot"></span> <span id="storage-label">LOCAL-FIRST</span><br><small id="storage-note">Your database stays on this computer.<br>Your API key is never saved.</small></div>
-  </aside>
   <main>
     <header>
-      <div><p class="eyebrow">GARMIN CONNECT / PERSONAL ANALYTICS</p><h1>Find your flow.</h1><p class="subtitle">Less guesswork. More insight. Every length counts.</p></div>
-      <span class="badge" id="source">NO DATA</span>
+      <div><p class="eyebrow">GARMIN CONNECT / PERSONAL ANALYTICS</p><h1>Find your flow.</h1></div>
+      <div class="header-actions"><span class="badge" id="source">NO DATA</span><button id="export" class="secondary" disabled>Export CSV</button></div>
     </header>
     <nav class="tabs" role="tablist" aria-label="Swim dashboard tabs">
       <button id="overview-tab" role="tab" aria-selected="true" aria-controls="tab-overview" tabindex="0">Overview</button>
@@ -27,16 +23,20 @@
       <button id="routes-tab" role="tab" aria-selected="false" aria-controls="tab-routes" tabindex="-1">Open-water routes</button>
       <button id="records-tab" role="tab" aria-selected="false" aria-controls="tab-records" tabindex="-1">Personal bests</button>
       <button id="logbook-tab" role="tab" aria-selected="false" aria-controls="tab-logbook" tabindex="-1">Swim logbook</button>
+      <button id="oceanman-tab" role="tab" aria-selected="false" aria-controls="tab-oceanman" tabindex="-1">Oceanman 14K</button>
     </nav>
+    <details class="analytics-filters">
+      <summary>Analytics filters</summary>
+      <section class="filterbar" aria-label="Analytics filters">
+        <label>Timeframe<select id="period"><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option><option value="all" selected>All saved history</option><option value="custom">Custom dates</option></select></label>
+        <label>Environment<select id="environment"><option value="all">Pool + open water</option><option value="pool">Pool only</option><option value="open_water">Open water only</option></select></label>
+        <label id="from-label" hidden>From<input type="date" id="from"></label><label id="to-label" hidden>To<input type="date" id="to"></label>
+        <label class="checkbox"><input type="checkbox" id="outliers"> Include excluded sessions</label>
+        <p class="hint">Oceanman uses full history and recent training windows, regardless of timeframe or environment.</p>
+      </section>
+    </details>
     <p id="status" role="status" aria-live="polite">Loading saved data...</p>
     <section id="activity-detail" aria-label="Detailed activity analysis" hidden></section>
-    <section class="filterbar" aria-label="Analytics filters">
-      <label>Timeframe<select id="period"><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option><option value="all" selected>All saved history</option><option value="custom">Custom dates</option></select></label>
-      <label>Environment<select id="environment"><option value="all">Pool + open water</option><option value="pool">Pool only</option><option value="open_water">Open water only</option></select></label>
-      <label id="from-label" hidden>From<input type="date" id="from"></label><label id="to-label" hidden>To<input type="date" id="to"></label>
-      <label class="checkbox"><input type="checkbox" id="outliers"> Include excluded sessions</label>
-      <button id="export" class="secondary" disabled>Export CSV</button>
-    </section>
     <section id="tab-overview" class="tab-panel" role="tabpanel" aria-labelledby="overview-tab">
     <details class="connection panel" id="connection" open>
       <summary>Connect &amp; sync <span>Garmin Personal API</span></summary>
@@ -89,6 +89,7 @@
       <div class="section-heading"><div><p class="eyebrow">02 / TRAINING PATTERNS</p><h2>When you show up</h2></div></div>
       <article class="panel"><div class="panel-heading"><h3>Weekday x hour</h3><span>LOCAL SESSION START TIME</span></div><p class="chart-note">One count per session start, not time spent swimming. Brighter cells = more sessions.</p><div id="heatmap" class="heatmap"></div></article>
       <div class="section-heading"><div><p class="eyebrow">POOL / OPEN WATER</p><h2>Training by environment</h2></div></div>
+      <p class="hint">Averages use available sessions; pace is weighted by distance. Pool-length metrics are not applicable to open water. Missing data is shown as --.</p>
       <div id="environment-summary" class="summary-grid"></div>
       </div>
     </section>
@@ -101,23 +102,19 @@
     </section>
     <section id="tab-records" class="tab-panel" role="tabpanel" aria-labelledby="records-tab" hidden>
       <div class="section-heading"><div><p class="eyebrow">05 / PERSONAL BESTS</p><h2>Your podium, not predictions</h2></div>
-        <div class="record-controls"><label>Top<select id="record-limit"><option value="3">3</option><option value="5">5</option><option value="10">10</option></select></label>
-          <label>Rank by<select id="ranking-metric"><option value="distance">Longest distance</option><option value="pace">Fastest pace</option><option value="swolf">Lowest SWOLF</option></select></label></div>
+        <div class="record-controls"><label>Top<select id="record-limit"><option value="3">3</option><option value="5">5</option><option value="10">10</option></select></label></div>
       </div>
-      <p class="hint">Pool efforts use exact-distance windows of recorded FIT lengths, including rests between lengths. One best effort per session. IM uses 80/100/160/200 m distances and requires equal butterfly / backstroke / breaststroke / freestyle legs in that order; 80 m and 160 m are available only for 20 m pools. These are locally calculated efforts, not Garmin's official personal records. Fastest session requires at least 100 m.</p>
-      <article class="panel ranking-panel"><div class="panel-heading"><h3 id="ranking-title">Longest distance</h3><span id="ranking-count">TOP 3</span></div><div id="ranking-list"></div></article>
-      <div class="records-heading"><div><p class="eyebrow">EXPLORE YOUR EFFORTS</p><h2>Choose your stroke.</h2></div><span class="hint">Exact recorded distances</span></div>
-      <div id="record-groups" class="record-groups" aria-label="Filter records by stroke">
+      <div class="records-heading"><div><p class="eyebrow">EXPLORE YOUR EFFORTS</p><h2>Choose your category.</h2></div></div>
+      <div id="record-groups" class="record-groups" aria-label="Filter records by category">
         <button type="button" data-record-group="freestyle" aria-pressed="true">Freestyle</button>
         <button type="button" data-record-group="breaststroke" aria-pressed="false">Breaststroke</button>
         <button type="button" data-record-group="backstroke" aria-pressed="false">Backstroke</button>
         <button type="button" data-record-group="butterfly" aria-pressed="false">Butterfly</button>
         <button type="button" data-record-group="im" aria-pressed="false">Individual medley</button>
-        <button type="button" data-record-group="mixed" aria-pressed="false">Any stroke</button>
         <button type="button" data-record-group="open_water" aria-pressed="false">Open water</button>
-        <button type="button" data-record-group="session" aria-pressed="false">Sessions</button>
       </div>
-      <div id="record-cards" class="record-grid"></div>
+      <p class="hint" id="record-method"></p>
+      <div id="record-cards"></div>
     </section>
     <section id="tab-logbook" class="tab-panel" role="tabpanel" aria-labelledby="logbook-tab" hidden>
       <div class="section-heading"><div><p class="eyebrow">04 / SWIM LOGBOOK</p><h2>Every metric. One place.</h2></div><span id="table-count" class="badge">0 SESSIONS</span></div>
@@ -133,6 +130,63 @@
       <div class="panel table-panel"><div class="table-wrap" tabindex="0" aria-label="Scrollable swim metrics"><table><thead id="table-head"></thead><tbody id="sessions"></tbody></table></div></div>
       <details class="panel review-panel"><summary>Data quality &amp; exclusions <span id="quality-count"></span></summary><p class="hint">Conservative physical limits and robust pace deviations flag sessions, not delete them. Unusual does not mean wrong: technique drills and long rests may be legitimate. Include / exclude decisions are saved locally. Invalid FIT lengths never qualify for records.</p><div id="quality"></div></details>
       <details class="panel review-panel"><summary>Import coverage &amp; warnings <span id="import-count"></span></summary><div id="import-warnings" class="hint"></div></details>
+    </section>
+    <section id="tab-oceanman" class="tab-panel" role="tabpanel" aria-labelledby="oceanman-tab" hidden>
+      <div class="oceanman-hero panel">
+        <div><p class="eyebrow">OBJETIVO / 13 JUN 2027</p><h2>OCEANMAN · Lago d'Orta 14K</h2>
+          <p>Seguimiento de tu plan semanal y preparación para una travesía de 14 km. Corte oficial de referencia: 6 horas.</p></div>
+        <div class="readiness-total"><span>PREPARACIÓN</span><strong id="readiness-score">--</strong>
+          <small id="readiness-passed">0 de 6 checks superados</small><small id="readiness-coverage"></small></div>
+      </div>
+      <p class="hint">Se analiza todo el historial guardado, respetando el interruptor global de sesiones excluidas. Las estimaciones dependen de la calidad y cantidad de datos; no son una predicción ni consejo médico.</p>
+      <div class="oceanman-section">
+        <div class="section-heading"><div><p class="eyebrow">CARGA RECIENTE</p><h2>Ventanas rodantes de volumen</h2></div></div>
+        <p class="hint">Distancia nadada en los últimos días naturales, comparada con tus objetivos de carga.</p>
+        <div id="rolling-windows" class="rolling-grid"></div>
+      </div>
+      <div class="oceanman-section">
+        <div class="section-heading"><div><p class="eyebrow">PREPARACIÓN / CHECKS</p><h2>Checks Oceanman 14K</h2></div></div>
+        <p class="hint">Índice Garmin v3: tirada larga 15%, resistencia en aguas abiertas 25%, volumen 25%, continuidad de sesión 15%, constancia 10% y estabilidad del crol en sesión 10%. Mínimo de movimiento/total: 70% para tirada larga y resistencia OW; continuidad se completa con una mediana ≥70%. Admite sesiones de series, sin afirmar nado continuo. Tirada larga, resistencia, continuidad y técnica usan los últimos 90 días; volumen y constancia, 8 semanas completas. Los datos insuficientes no suman puntos ni se redistribuyen. Es un índice de evidencias, no una probabilidad de terminar ni una predicción del tiempo de carrera.</p>
+        <div class="check-filters" aria-label="Filtrar checks">
+          <button type="button" data-check-filter="all" aria-pressed="true">Todos (6)</button>
+          <button type="button" data-check-filter="completed" aria-pressed="false">Superados (0)</button>
+          <button type="button" data-check-filter="progress" aria-pressed="false">En progreso (0)</button>
+          <button type="button" data-check-filter="pending" aria-pressed="false">Pendientes (6)</button>
+        </div>
+        <div id="readiness-checks" class="readiness-checks"></div>
+      </div>
+      <div class="oceanman-section">
+        <div class="section-heading"><div><p class="eyebrow">HISTORIAL</p><h2>Evolución del % de preparación</h2></div>
+          <div class="trend-filters" aria-label="Agrupar evolución">
+            <button type="button" data-trend-period="day" aria-pressed="true">Día a día</button>
+            <button type="button" data-trend-period="week" aria-pressed="false">Semanal</button>
+            <button type="button" data-trend-period="month" aria-pressed="false">Mensual</button>
+          </div>
+        </div>
+        <p class="hint">El modelo Garmin v3 se recalcula para cada fecha sin usar sesiones posteriores; sustituye la antigua proyección y los requisitos de bloques continuos. Las líneas de 50%, 70% y 85% son referencias visuales, no niveles clínicos de aptitud.</p>
+        <article class="panel trend-panel"><div id="readiness-trend" class="readiness-trend"></div></article>
+      </div>
+      <div class="oceanman-section">
+        <div class="section-heading"><div><p class="eyebrow">PLAN / 35 SEMANAS</p><h2>Objetivo y volumen real</h2></div>
+          <span id="plan-progress" class="badge">0 / 35 semanas</span></div>
+        <p class="hint">Los objetivos originales están en metros; se muestran en km. Diff = real − objetivo semanal. min/avg/max son distancias por sesión y OW es la distancia en aguas abiertas. Azul más intenso = mayor distancia diaria, con una escala común para todas las semanas. Cero y días futuros no se colorean.</p>
+        <p id="plan-color-scale" class="hint"></p>
+        <div class="panel table-panel"><div class="table-wrap oceanman-plan-wrap" tabindex="0" aria-label="Tabla semanal del plan Oceanman">
+          <table class="oceanman-plan-table"><thead id="oceanman-plan-head"></thead><tbody id="oceanman-plan-body"></tbody></table>
+        </div></div>
+      </div>
+      <div class="oceanman-section">
+        <div class="section-heading"><div><p class="eyebrow">REFERENCIA DE TEMPORADA</p><h2>Lago d'Orta · junio</h2></div><span class="badge">MEDIAS 2021–2026</span></div>
+        <p class="hint">Valores orientativos compartidos para la planificación, no una previsión meteorológica ni las condiciones oficiales de carrera. Confirma la seguridad y las condiciones reales cerca del evento.</p>
+        <div class="summary-grid lake-reference">
+          <article class="summary-card"><h3>Temperatura del agua</h3><strong>18,5–20,5 °C</strong><small>Agua dulce de origen glaciar; termoclina orientativa a partir de 4–5 m.</small></article>
+          <article class="summary-card"><h3>Temperatura ambiente</h3><strong>22–28 °C</strong><small>Mañana en Omegna y máximo térmico hacia Lido di Gozzano.</small></article>
+          <article class="summary-card"><h3>Viento</h3><strong>6–14 km/h</strong><small>Calma matinal aproximada 09:30–11:30; brisa térmica después (Fuerza 2).</small></article>
+          <article class="summary-card"><h3>Oleaje</h3><strong>0,1–0,35 m</strong><small>Lago protegido; sin mareas ni corrientes de marea marinas.</small></article>
+          <article class="summary-card"><h3>Visibilidad</h3><strong>4–6 m</strong><small>Visibilidad nítida orientativa, sujeta al estado real del lago.</small></article>
+          <article class="summary-card"><h3>Radiación UV</h3><strong>Índice 7–8</strong><small>Mayor insolación aproximada 11:30–14:30; protege piel y ojos.</small></article>
+        </div>
+      </div>
     </section>
     <footer id="privacy-note">SWIMLAB / Independent personal dashboard, not affiliated with Garmin. Local, unencrypted health and optional GPS route data: protect this computer and its backups. Never expose this server to the Internet.</footer>
   </main>

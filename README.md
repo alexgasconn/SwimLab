@@ -1,6 +1,7 @@
 # SWIMLAB
 
-Local-first Garmin swimming analytics, in English. Node.js **22.16+**.
+Local-first Garmin swimming analytics. The main dashboard is in English; the
+Oceanman 14K preparation tab is in Spanish. Node.js **22.16+**.
 No framework, chart CDN or external analytics. Uses the official Garmin FIT SDK,
 fflate for Garmin's ZIP exports, and Node's built-in SQLite.
 
@@ -20,11 +21,17 @@ SQLite is experimental in Node 22 and may print a warning.
 
 SwimLab opens directly on the swim dashboard and syncs swimming activities only.
 
-- Separate Overview, Performance, Training patterns, Open-water routes, Personal bests
-  and Swim logbook tabs. Filters are shared across analytics tabs.
+- Separate Overview, Performance, Training patterns, Open-water routes, Personal bests,
+  Swim logbook and Oceanman 14K tabs.
+- Timeframe, environment and excluded-session controls are in the collapsible
+  filter section above the dashboard. CSV export remains in the header.
+  The global date and environment filters apply to the existing analytics; Oceanman
+  uses all saved dates and swim types, while respecting the excluded-session toggle.
 - Moving pace vs distance scatterplot; pace and distance histograms.
 - Session SWOLF trend and pool / open-water summaries, including counts, session
-  share, average distance and pace, and pool-length breakdowns.
+  share, distance, pace, moving time, heart rate and available technique averages,
+  plus pool-length breakdowns. Pace is distance-weighted; other averages use
+  measured sessions. Pool-length metrics are not applicable to open water.
 - Weekly trends for distance, pace, DPS, SPL, SWOLF, TPL, efficiency and SPM.
   Distance is a weekly total and includes empty weeks as zero. Other metrics
   average measured sessions in each week; their trailing four-week means skip
@@ -35,12 +42,13 @@ SwimLab opens directly on the swim dashboard and syncs swimming activities only.
 - Monday-Sunday x 24-hour heatmap: counts **session starts** in Garmin's local
   start time, not the computer's conversion of GPS timestamps or hours swum.
 - Pool / open-water, date-range and excluded-session filters affect the dashboard.
-- Configurable top 3/5/10 rankings by distance, pace or SWOLF. Exact-length
-  40/50/80/100/150/160/200/250/400/500/700/750/800/1000/1500 m efforts by stroke, 100/200/500/1000 m
-  efforts, 80/160 m IM efforts for 20 m pools, 100/200 m IM efforts, and
-  longest / fastest sessions use the current filtered view. Use the stroke
-  selector to explore each group independently.
-  Open water has separate whole-session distance and moving-pace podiums (no GPS splits).
+- Configurable top 3/5/10 personal-best selector for exact-length efforts by stroke: sprint
+  (40/50/80/100 m), middle distance (200/400/500 m), and long distance
+  (800/1000/1500/2000 m), plus 100/200/400 m individual medley. Results use
+  the current filtered view and recorded pool lengths only.
+  Open-water records use whole activities within ±7% of 750/1000/1500/1852
+  (nautical mile)/3000/5000 m, ranked by moving time. Actual distance and
+  moving pace are shown; shorter activities within a range can rank faster.
 - Overall stroke mix is weighted by recorded active pool-length distance in the
   filtered view. Drills, mixed and unknown lengths remain in the denominator,
   even though they are not displayed as a separate stroke. Sessions without
@@ -52,6 +60,19 @@ SwimLab opens directly on the swim dashboard and syncs swimming activities only.
 - Full metric logbook with sortable columns and distance / pool-length filters.
   These filters also apply to CSV export, but not the other dashboard views.
   Reversible per-session review and import warnings remain available.
+- Oceanman tab with the supplied 35-week plan, weekday distance, swim-distance
+  summaries, four rolling-volume targets, weighted readiness checks and daily /
+  weekly / monthly readiness history. It analyzes the full saved history and
+  respects the global excluded-session toggle; plan weekly volumes are shown in km.
+  Daily distance cells share a blue heat scale across all 35 weeks; zero and
+  future values are uncolored. The cumulative-deficit column is no longer used.
+- Oceanman **Garmin v3** is a training-evidence index, not medical advice, a validated
+  physiological model or a probability of finishing. Weights: long session 15%,
+  recent open-water endurance 25%, weekly volume 25%, continuity 15%,
+  consistency 10%, FIT technical stability 10%. Missing evidence adds no points
+  and its weight is not redistributed; the evaluable weight is shown separately.
+  The Lago d'Orta June climate panel is a static reference supplied for planning,
+  not live or official race-condition data.
 - Demo data is explicitly synthetic and never written to SQLite.
 
 ## Activity lab
@@ -64,7 +85,10 @@ The detail page shows the selected activity even if it is excluded from analytic
 Four internal tabs keep the analysis readable:
 - Overview: session totals, stroke distance shares and a timestamped length/rest ribbon.
 - Sets & lengths: a chronological, expandable list of detected sets and recorded rests,
-  with unrecorded gaps identified separately, plus pace/stroke charts and
+  with unrecorded gaps identified separately. Sets show DPS, SPM and mean SWOLF
+  at a glance, plus stroke count, SPL, TPL, LPM, swim index, timing and sample-weighted
+  heart rate when expanded. Stroke-derived set metrics require recorded counts for
+  every length; missing values are not estimated. The tab also has pace/stroke charts and
   a detailed table including duration, timer, DPS, SPM, LPM, SWOLF and aligned HR.
 - Technique & trends: per-stroke/pool-length charts, first/last-quarter medians
   (minimum eight measured lengths), and descriptive Pearson correlations
@@ -119,9 +143,48 @@ best effort per category, so overlapping windows cannot fill a podium.
 Each distance card also shows the number of valid, non-overlapping attempts in the
 current filtered view.
 Fastest session uses moving pace and a minimum 100 m session distance.
-Record cards show the pace per 100 m for the recorded effort, including rests;
-session records and rankings show the session's moving pace when available.
+Record cards highlight total effort time (including rests) and show pace per 100 m.
+Whole-session records and rankings highlight elapsed time and show moving pace
+separately when available. The ranking criteria are unchanged.
 When lengths are unavailable, the dashboard says so instead of displaying a fake record.
+
+## Oceanman Garmin v3
+
+Long session, endurance, continuity and technique use the preceding 90 calendar days;
+volume and consistency use the last eight **complete Monday-Sunday weeks**, with
+unrecorded weeks counting as zero. The final targets remain 20 km/week and 10 km
+open water, not the current phase's weekly plan target. History is recomputed with
+this model at each saved session date and today, using no later sessions; timestamps
+on the chart use a real date scale. History is not a record of past model versions.
+
+- Long session replaces the former 14K projection: maximum recent pool/OW session
+  distance with valid timing, >=1.5 km and >=70% moving/total time. Progress is
+  distance / 5 km, capped at 100%. All strokes contribute, FIT is not required.
+  This can include intervals and does not predict race time or uninterrupted endurance.
+- OW endurance is the longest recent >=2 km session with valid timing and >=70%
+  moving/total time. Old records and long rested sessions do not complete the check.
+  The 70% minimum permits up to 30% recorded non-moving time; it is a relaxed
+  evidence threshold, not proof of uninterrupted swimming.
+- Continuity uses a median of at least three complete >=1.5 km pool/OW sessions
+  with valid timing, including every style and planned rests between intervals.
+  Progress runs from zero at 50% moving/total to 100% at 70%.
+- Session freestyle stability replaces technical stability under continuous fatigue:
+  last five eligible sessions (at least three), each with >=400 m and >=16 valid
+  freestyle lengths. First/last quarters of those lengths are compared **within
+  the same session, stroke and pool length**, even with intervening rests or styles.
+  Lengths must have valid non-overlapping timestamps, plausible pace (30-900 s/100 m),
+  the recorded pool length, and positive strokes; invalid lengths are omitted.
+  This describes session stability, not continuous fatigue; workout intensity,
+  warm-up, drills, wall push-offs and rests can change the result.
+  Pace slowdown and DPS loss must each be <=5%; the worse deterioration drives
+  progress from 100% at <=5% to zero at >=15%. These are explicit heuristic
+  tolerances, not physiological thresholds. DPS, SPL, LPM and SWOLF are displayed
+  by pool length as supporting evidence, not duplicate scores. No absolute
+  SWOLF/SPL target or cross-pool comparison is used. Heart-rate averages alone no
+  longer generate an "efficiency" score across dissimilar swims.
+
+These checks cannot measure fueling, navigation, cold tolerance, recovery or the
+actual race conditions; volume windows are distance totals, not a clinical ATL model.
 
 ## Data quality
 

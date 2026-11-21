@@ -60,6 +60,21 @@ export function activityAnalysis(activity, lengths = [], records = []) {
     b.start = b.rows[0].start;
     b.end = b.rows.at(-1).end;
     b.elapsed = Number.isFinite(b.start) && b.end != null ? b.end - b.start : null;
+    const count = b.rows.length;
+    const strokes = b.rows.every(r => r.spl != null) ? b.rows.reduce((sum, r) => sum + r.spl, 0) : null;
+    const timerTime = b.rows.every(r => nonnegative(r.timerTime) != null)
+      ? b.rows.reduce((sum, r) => sum + r.timerTime, 0) : null;
+    const hrSamples = b.rows.reduce((sum, r) => sum + r.hrSamples, 0);
+    const dps = divide(b.distance, strokes);
+    b.metrics = {
+      strokes, timerTime, dps, spl: divide(strokes, count),
+      spm: divide(strokes == null ? null : strokes * 60, b.duration),
+      swolf: strokes == null ? null : (b.duration + strokes) / count,
+      tpl: b.duration / count, lpm: count * 60 / b.duration,
+      efficiency: dps == null ? null : b.distance / b.duration * dps,
+      heartRate: divide(b.rows.reduce((sum, r) => sum + r.heartRate * r.hrSamples, 0), hrSamples),
+      hrSamples,
+    };
   }
   const timed = rows.filter(r => Number.isFinite(r.start) && r.end != null);
   const starts = [...timed.map(r => r.start), ...samples.map(r => r.timestamp)];
@@ -260,38 +275,50 @@ export function filterLogbook(activities, { minDistance = null, maxDistance = nu
 }
 
 const strokeOrder = ['butterfly', 'backstroke', 'breaststroke', 'freestyle'];
-const strokeDistances = [40, 50, 80, 100, 150, 160, 200, 250, 400, 500, 700, 750, 800, 1000, 1500];
+export const recordDistanceGroups = [
+  { title: 'Sprint', distances: [40, 50, 80, 100] },
+  { title: 'Middle distance', distances: [200, 400, 500] },
+  { title: 'Long distance', distances: [800, 1000, 1500, 2000] },
+];
+export const openWaterRecordDistances = [
+  { distance: 750, label: '750 m' },
+  { distance: 1000, label: '1000 m' },
+  { distance: 1500, label: '1500 m' },
+  { distance: 1852, label: 'Nautical mile (1852 m)' },
+  { distance: 3000, label: '3000 m' },
+  { distance: 5000, label: '5000 m' },
+];
+const openWaterKey = distance => `${distance}m open water`;
 const categories = [
-  { key: '100m', distance: 100 }, { key: '200m', distance: 200 },
-  { key: '500m', distance: 500 }, { key: '1000m', distance: 1000 },
-  { key: '80m IM', distance: 80, medley: true, poolLength: 20 },
-  { key: '160m IM', distance: 160, medley: true, poolLength: 20 },
-  { key: '100m IM', distance: 100, medley: true }, { key: '200m IM', distance: 200, medley: true },
+  ...[100, 200, 400].map(distance => ({ key: `${distance}m IM`, distance, medley: true })),
   ...['freestyle', 'breaststroke', 'backstroke', 'butterfly'].flatMap(stroke =>
-    strokeDistances.map(distance => ({ key: `${distance}m ${stroke}`, distance, stroke }))),
+    recordDistanceGroups.flatMap(group => group.distances.map(distance => ({ key: `${distance}m ${stroke}`, distance, stroke })))),
 ];
 
 export function personalBests(activities, lengths, limit = 3) {
-  const result = Object.fromEntries([...categories.map(c => c.key),
-    'Longest session', 'Fastest session', 'Longest open water', 'Fastest open water'].map(key => [key, []]));
-  const attempts = Object.fromEntries(categories.map(category => [category.key, 0]));
+  const keys = [...categories.map(category => category.key), ...openWaterRecordDistances.map(({ distance }) => openWaterKey(distance))];
+  const result = Object.fromEntries(keys.map(key => [key, []]));
+  const attempts = Object.fromEntries(keys.map(key => [key, 0]));
   const byId = new Map();
   for (const length of lengths) {
     if (!byId.has(length.activityId)) byId.set(length.activityId, []);
     byId.get(length.activityId).push(length);
   }
   for (const activity of activities) {
-    const entry = { id: activity.id, name: activity.name, date: activity.date, pace: activity.pace };
-    if (activity.distance > 0) result['Longest session'].push({ ...entry, value: activity.distance });
-    if (activity.distance >= 100 && activity.pace > 0) result['Fastest session'].push({ ...entry, value: activity.pace });
-    if (activity.type === 'open_water') {
-      if (activity.distance > 0) result['Longest open water'].push({ ...entry, value: activity.distance });
-      if (activity.distance >= 100 && activity.pace > 0) result['Fastest open water'].push({ ...entry, value: activity.pace });
+    const entry = { id: activity.id, name: activity.name, date: activity.date, pace: activity.pace,
+      duration: positive(activity.elapsedTime) };
+    if (activity.type === 'open_water' && positive(activity.distance) && positive(activity.movingTime)) {
+      for (const { distance } of openWaterRecordDistances) {
+        if (activity.distance < distance * 0.93 || activity.distance > distance * 1.07) continue;
+        const key = openWaterKey(distance);
+        attempts[key]++;
+        result[key].push({ ...entry, distance: activity.distance, value: activity.movingTime,
+          duration: activity.movingTime, pace: activity.movingTime * 100 / activity.distance });
+      }
     }
     if (activity.type !== 'pool') continue;
     const active = (byId.get(activity.id) ?? []).filter(l => l.active).sort((a, b) => a.sequence - b.sequence);
     for (const category of categories) {
-      if (category.poolLength != null && activity.poolLength !== category.poolLength) continue;
       if (category.stroke && category.stroke !== 'freestyle' && !active.some(l => l.stroke === category.stroke)) continue;
       const efforts = [];
       for (let start = 0; start < active.length; start++) {
@@ -327,11 +354,11 @@ export function personalBests(activities, lengths, limit = 3) {
       }
       const best = efforts.reduce((minimum, effort) => Math.min(minimum, effort.time), Infinity);
       // One best effort per session avoids filling the podium with overlapping windows.
-      if (Number.isFinite(best)) result[category.key].push({ ...entry, value: best, pace: best * 100 / category.distance });
+      if (Number.isFinite(best)) result[category.key].push({ ...entry, value: best, duration: best, pace: best * 100 / category.distance });
     }
   }
   for (const [key, entries] of Object.entries(result)) {
-    entries.sort((a, b) => key.startsWith('Longest ') ? b.value - a.value : a.value - b.value);
+    entries.sort((a, b) => a.value - b.value);
     result[key] = entries.slice(0, limit);
   }
   result.attempts = attempts;
@@ -348,19 +375,29 @@ export function sessionRankings(activities, metric, limit = 5) {
     : metric === 'pace' ? a.distance >= 100 && a.pace > 0 : a.swolf > 0);
   const value = a => metric === 'distance' ? a.distance : metric === 'pace' ? a.pace : a.swolf;
   return candidates.sort((a, b) => metric === 'distance' ? value(b) - value(a) : value(a) - value(b))
-    .slice(0, limit).map(a => ({ id: a.id, name: a.name, date: a.date, value: value(a), type: a.type, pace: a.pace }));
+    .slice(0, limit).map(a => ({ id: a.id, name: a.name, date: a.date, value: value(a), type: a.type, pace: a.pace,
+      duration: positive(a.elapsedTime) }));
 }
 
 export function trainingSummary(activities) {
   const summarize = rows => {
     const paced = rows.filter(a => a.distance > 0 && a.movingTime > 0);
     const measuredDistance = rows.filter(a => a.distance > 0);
+    const average = getValue => mean(rows.map(getValue).map(positive).filter(value => value != null));
     return {
       sessions: rows.length,
       distance: rows.reduce((sum, a) => sum + (a.distance > 0 ? a.distance : 0), 0),
       averageDistance: measuredDistance.length ? measuredDistance.reduce((sum, a) => sum + a.distance, 0) / measuredDistance.length : null,
       averagePace: divide(paced.reduce((sum, a) => sum + a.movingTime * 100, 0), paced.reduce((sum, a) => sum + a.distance, 0)),
-      averageSwolf: mean(rows.map(a => a.swolf).filter(value => value > 0)),
+      averageSwolf: average(a => a.swolf),
+      averageMovingTime: average(a => a.movingTime),
+      averageHeartRate: average(a => a.heartRate),
+      averageSpm: average(a => a.spm),
+      averageDps: average(a => a.dps),
+      averageSpl: average(a => a.spl),
+      averageTpl: average(a => a.tpl),
+      averageLpm: average(a => a.lpm),
+      averageEfficiency: average(a => weeklyMetrics.efficiency.value(a)),
     };
   };
   const pool = activities.filter(a => a.type === 'pool');
@@ -378,6 +415,259 @@ export function trainingSummary(activities) {
     poolLengths: [...poolLengths.entries()].sort(([a], [b]) => (a ?? Infinity) - (b ?? Infinity))
       .map(([length, rows]) => ({ length, ...summarize(rows) })),
   };
+}
+
+export const oceanmanPlan = [
+  ['2026-10-12', 6], ['2026-10-19', 7], ['2026-10-26', 8], ['2026-11-02', 9], ['2026-11-09', 10],
+  ['2026-11-16', 11], ['2026-11-23', 12], ['2026-11-30', 9], ['2026-12-07', 13], ['2026-12-14', 14],
+  ['2026-12-21', 15], ['2026-12-28', 11], ['2027-01-04', 16], ['2027-01-11', 17], ['2027-01-18', 18],
+  ['2027-01-25', 13], ['2027-02-01', 19], ['2027-02-08', 20], ['2027-02-15', 21], ['2027-02-22', 15],
+  ['2027-03-01', 22], ['2027-03-08', 23], ['2027-03-15', 24], ['2027-03-22', 16], ['2027-03-29', 25],
+  ['2027-04-05', 26], ['2027-04-12', 27], ['2027-04-19', 28], ['2027-04-26', 18], ['2027-05-03', 26],
+  ['2027-05-10', 24], ['2027-05-17', 20], ['2027-05-24', 15], ['2027-05-31', 10], ['2027-06-07', 3.5],
+].map(([week, targetKm], index) => ({ number: index + 1, week, targetKm }));
+
+const swimming = activities => activities.filter(a => ['pool', 'open_water'].includes(a.type)
+  && positive(a.distance) && !Number.isNaN(localDate(a.date).getTime()));
+
+export function oceanmanPlanRows(activities, asOf = new Date()) {
+  const rows = swimming(activities);
+  const today = new Date(asOf);
+  today.setHours(23, 59, 59, 999);
+  const thisMonday = monday(today);
+  return oceanmanPlan.map(week => {
+    const start = localDate(`${week.week}T00:00:00`);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    const sessions = rows.filter(a => {
+      const date = localDate(a.date);
+      return date >= start && date < end && date <= today;
+    });
+    const dailyKm = Array(7).fill(0);
+    for (const session of sessions) {
+      const date = localDate(session.date);
+      dailyKm[(date.getDay() + 6) % 7] += session.distance / 1000;
+    }
+    const distances = sessions.map(a => a.distance / 1000);
+    const current = start <= thisMonday;
+    return {
+      ...week,
+      actualKm: current ? dailyKm.reduce((sum, km) => sum + km, 0) : null,
+      diffKm: current ? dailyKm.reduce((sum, km) => sum + km, 0) - week.targetKm : null,
+      dailyKm: current ? dailyKm : null,
+      swims: current ? sessions.length : null,
+      minKm: current && distances.length ? Math.min(...distances) : null,
+      averageKm: current && distances.length ? distances.reduce((sum, km) => sum + km, 0) / distances.length : null,
+      maxKm: current && distances.length ? Math.max(...distances) : null,
+      openWaterKm: current ? sessions.filter(a => a.type === 'open_water').reduce((sum, a) => sum + a.distance / 1000, 0) : null,
+    };
+  });
+}
+
+const rollingTargets = [
+  { days: 14, targetKm: 35, label: 'Carga aguda activa (ATL)' },
+  { days: 30, targetKm: 75, label: 'Carga mensual sostenida' },
+  { days: 60, targetKm: 150, label: 'Mesociclo de carga' },
+  { days: 90, targetKm: 200, label: 'Macrobase trimestral' },
+];
+
+export function oceanmanRollingVolumes(activities, asOf = new Date()) {
+  const rows = swimming(activities);
+  const end = localDate(`${dateKey(asOf)}T00:00:00`);
+  end.setHours(23, 59, 59, 999);
+  return rollingTargets.map(window => {
+    const start = localDate(`${dateKey(asOf)}T00:00:00`);
+    start.setDate(start.getDate() - window.days + 1);
+    const actualKm = rows.filter(a => {
+      const date = localDate(a.date);
+      return date >= start && date <= end;
+    }).reduce((sum, a) => sum + a.distance / 1000, 0);
+    return { ...window, actualKm, progress: Math.min(100, actualKm / window.targetKm * 100) };
+  });
+}
+
+const boundedPercent = value => Math.max(0, Math.min(100, value));
+
+function freestyleQuarterMetrics(quarter) {
+  const metres = quarter.reduce((sum, length) => sum + length.distance, 0);
+  const seconds = quarter.reduce((sum, length) => sum + length.duration, 0);
+  if (!quarter.length || !quarter.every(length => positive(length.strokes))) return null;
+  const strokes = quarter.reduce((sum, length) => sum + length.strokes, 0);
+  return { pace: seconds * 100 / metres, dps: metres / strokes,
+    spl: strokes / quarter.length, lpm: quarter.length * 60 / seconds,
+    swolf: (seconds + strokes) / quarter.length };
+}
+
+function validFreestyleLength(length, activity) {
+  const pace = positive(length.duration) && positive(length.distance) ? length.duration * 100 / length.distance : null;
+  return length.active && length.stroke === 'freestyle' && Number.isFinite(length.start)
+    && Number.isInteger(length.sequence) && pace != null && pace >= 30 && pace <= 900
+    && Math.abs(length.distance - activity.poolLength) <= 0.01;
+}
+
+function freestyleSessionTechnique(activities, lengths) {
+  const byId = new Map();
+  for (const length of lengths) {
+    if (!byId.has(length.activityId)) byId.set(length.activityId, []);
+    byId.get(length.activityId).push(length);
+  }
+  return activities.filter(a => a.type === 'pool' && positive(a.poolLength)).flatMap(activity => {
+    const valid = [];
+    let previousEnd = -Infinity, previousSequence = -Infinity;
+    for (const length of [...(byId.get(activity.id) ?? [])].sort((a, b) => a.sequence - b.sequence)) {
+      if (!validFreestyleLength(length, activity) || !positive(length.strokes)
+        || length.sequence <= previousSequence || length.start < previousEnd - 1e-6) continue;
+      valid.push(length);
+      previousSequence = length.sequence;
+      previousEnd = length.start + length.duration;
+    }
+    const distance = valid.reduce((sum, length) => sum + length.distance, 0);
+    if (distance < 400 || valid.length < 16) return [];
+    const quarterSize = Math.floor(valid.length / 4);
+    const first = freestyleQuarterMetrics(valid.slice(0, quarterSize));
+    const last = freestyleQuarterMetrics(valid.slice(-quarterSize));
+    return [{ activityId: activity.id, poolLength: activity.poolLength, distance, lengths: valid.length, first, last,
+      paceFade: (last.pace / first.pace - 1) * 100, dpsLoss: (1 - last.dps / first.dps) * 100 }];
+  });
+}
+
+export function oceanmanReadiness(activities, asOf = new Date(), lengths = []) {
+  const minimumMovingRatio = 0.7;
+  const meetsMovingMinimum = ratio => ratio >= minimumMovingRatio - 1e-9;
+  const rows = swimming(activities).filter(a => localDate(a.date) <= asOf);
+  const start = new Date(asOf);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - 89);
+  const recent = rows.filter(a => localDate(a.date) >= start);
+  const validTiming = a => positive(a.movingTime) && positive(a.elapsedTime)
+    && a.movingTime <= a.elapsedTime;
+  const openWater = recent.filter(a => a.type === 'open_water' && a.distance >= 2000 && validTiming(a));
+  const longSessions = recent.filter(a => a.distance >= 1500 && validTiming(a));
+  const qualifiedLongSessions = longSessions.filter(a => meetsMovingMinimum(a.movingTime / a.elapsedTime));
+  const maxSessionKm = qualifiedLongSessions.reduce((maximum, a) => Math.max(maximum, a.distance / 1000), 0);
+  const continuousOpenWater = openWater.filter(a => meetsMovingMinimum(a.movingTime / a.elapsedTime));
+
+  const currentMonday = monday(asOf);
+  const recentWeeks = Array.from({ length: 8 }, (_, index) => {
+    const start = new Date(currentMonday);
+    start.setDate(start.getDate() - (8 - index) * 7);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    return rows.filter(a => {
+      const date = localDate(a.date);
+      return date >= start && date < end;
+    });
+  });
+  const weeklyAverage = recentWeeks.reduce((sum, week) =>
+    sum + week.reduce((total, a) => total + a.distance / 1000, 0), 0) / 8;
+  const consistentWeeks = recentWeeks.filter(week => week.length >= 3).length;
+  const continuityRatios = longSessions.map(a => a.movingTime / a.elapsedTime);
+  const continuity = continuityRatios.length >= 3 ? median(continuityRatios) : null;
+  const techniqueSessions = freestyleSessionTechnique(recent, lengths)
+    .sort((a, b) => localDate(recent.find(row => row.id === b.activityId).date)
+      - localDate(recent.find(row => row.id === a.activityId).date)).slice(0, 5);
+  const paceFade = techniqueSessions.length >= 3 ? median(techniqueSessions.map(session => session.paceFade)) : null;
+  const dpsLoss = techniqueSessions.length >= 3 ? median(techniqueSessions.map(session => session.dpsLoss)) : null;
+  const techniqueAvailable = paceFade != null && dpsLoss != null;
+  // Inclusive percentage thresholds allow numerical roundoff, not additional deterioration.
+  const paceStable = techniqueAvailable && paceFade <= 5 + 1e-9;
+  const dpsStable = techniqueAvailable && dpsLoss <= 5 + 1e-9;
+  const maxOpenWaterKm = continuousOpenWater.reduce((maximum, a) => Math.max(maximum, a.distance / 1000), 0);
+  const hasHistory = rows.length > 0;
+  const number = (value, digits = 1) => new Intl.NumberFormat('es-ES', { maximumFractionDigits: digits }).format(value);
+  const techniqueSummary = [...new Set(techniqueSessions.map(session => session.poolLength))].map(poolLength => {
+    const samePool = techniqueSessions.filter(session => session.poolLength === poolLength);
+    const metrics = ['dps', 'spl', 'lpm', 'swolf'].map(metric =>
+      `${metric.toUpperCase()} ${number(median(samePool.map(session => session.first[metric])), 2)}→${number(median(samePool.map(session => session.last[metric])), 2)}`);
+    return `${number(poolLength)} m (${samePool.length} sesiones): ${metrics.join('; ')}`;
+  }).join(' · ');
+  const techniqueProgress = !techniqueAvailable ? null
+    : paceStable && dpsStable ? 100 : boundedPercent(100 - Math.max(0, paceFade - 5, dpsLoss - 5) * 10);
+  const definitions = [
+    {
+      id: 'long-session', title: 'Tirada larga reciente', weight: 15,
+      value: hasHistory ? maxSessionKm : null, display: hasHistory ? `${number(maxSessionKm, 2)} km` : '--',
+      progress: hasHistory ? boundedPercent(maxSessionKm / 5 * 100) : null,
+      complete: maxSessionKm >= 5, available: longSessions.length > 0,
+      base: `${qualifiedLongSessions.length} de ${longSessions.length} sesiones ≥1,5 km con ≥70% en movimiento en los últimos 90 días. Piscina y OW; todos los estilos.`,
+      description: 'Mayor distancia registrada en una sesión reciente con ≥70% en movimiento/total. Objetivo: 5 km. Admite series y descansos; no prueba nado continuo ni predice el tiempo de 14 km. La resistencia OW sigue teniendo su propio objetivo de 10 km.',
+      milestones: [2, 3, 5].map(km => ({ label: `${km} km en una sesión con ≥70% en movimiento`, done: maxSessionKm >= km })),
+    },
+    {
+      id: 'open-water', title: 'Resistencia reciente en aguas abiertas', weight: 25,
+      value: hasHistory ? maxOpenWaterKm : null, display: hasHistory ? `${number(maxOpenWaterKm, 2)} km` : '--',
+      progress: hasHistory ? boundedPercent(maxOpenWaterKm / 10 * 100) : null,
+      complete: maxOpenWaterKm >= 10, available: openWater.length > 0,
+      base: `${continuousOpenWater.length} sesiones OW ≥2 km con ≥70% en movimiento en los últimos 90 días; ${openWater.length} con tiempos válidos.`,
+      description: 'Mayor distancia OW reciente con al menos 70% en movimiento/total. Admite hasta un 30% de tiempo no móvil registrado; no demuestra nado sin parar. Las sesiones por debajo del mínimo o sin tiempos válidos no acreditan esta distancia.',
+      milestones: [5, 8, 10].map(km => ({ label: `${km} km con ≥70% en movimiento`, done: maxOpenWaterKm >= km })),
+    },
+    {
+      id: 'weekly-volume', title: 'Volumen semanal sostenido', weight: 25,
+      value: hasHistory ? weeklyAverage : null, display: hasHistory ? `${number(weeklyAverage)} km/sem` : '--',
+      progress: hasHistory ? boundedPercent(weeklyAverage / 20 * 100) : null,
+      complete: weeklyAverage >= 20, available: hasHistory,
+      base: 'Media de las 8 últimas semanas completas, de lunes a domingo. Las semanas sin datos registrados cuentan como cero.',
+      description: 'Objetivo final: 20 km/semana sostenidos, no el cumplimiento del objetivo de esta fase del plan. Todos los estilos contribuyen al volumen. Un pico aislado no sustituye ocho semanas de base; el historial incompleto puede infravalorar la carga.',
+      milestones: [10, 15, 20].map(km => ({ label: `${km} km/semana`, done: weeklyAverage >= km })),
+    },
+    {
+      id: 'continuity', title: 'Continuidad de sesión', weight: 15,
+      value: continuity, display: continuity == null ? '--' : `${number(continuity * 100)}%`,
+      progress: continuity == null ? null : meetsMovingMinimum(continuity) ? 100
+        : boundedPercent((continuity - 0.5) / (minimumMovingRatio - 0.5) * 100),
+      complete: continuity != null && meetsMovingMinimum(continuity), available: continuity != null,
+      base: `${continuityRatios.length} sesiones completas ≥1,5 km en 90 días, piscina y OW. Requiere ≥3 con tiempos válidos; mediana de movimiento/total.`,
+      description: 'Continuidad de sesión, incluidos descansos entre series y todos los estilos. Objetivo ≥70% de mediana en movimiento/total; 50% o menos no suma puntos. No certifica nado continuo ni preparación clínica.',
+      milestones: [{ label: '60% del tiempo nadando', done: continuity != null && continuity >= 0.6 - 1e-9 },
+        { label: '70% del tiempo nadando', done: continuity != null && meetsMovingMinimum(continuity) }],
+    },
+    {
+      id: 'consistency', title: 'Constancia', weight: 10,
+      value: hasHistory ? consistentWeeks : null, display: hasHistory ? `${consistentWeeks} / 8 semanas` : '--',
+      progress: hasHistory ? boundedPercent(consistentWeeks / 6 * 100) : null,
+      complete: consistentWeeks >= 6, available: hasHistory,
+      base: `${consistentWeeks} de las 8 últimas semanas completas con ≥3 sesiones registradas.`,
+      description: 'Objetivo: 6 de 8 semanas con tres o más sesiones. La semana actual no se cuenta; los días sin registros no se inventan.',
+      milestones: [4, 6].map(weeks => ({ label: `${weeks} de 8 semanas`, done: consistentWeeks >= weeks })),
+    },
+    {
+      id: 'technique', title: 'Estabilidad del crol en sesión (FIT)', weight: 10,
+      value: techniqueAvailable ? Math.max(paceFade, dpsLoss) : null,
+      display: techniqueAvailable ? `Ritmo ${number(paceFade)}% · DPS ${number(-dpsLoss || 0)}%` : '--',
+      progress: techniqueProgress, complete: paceStable && dpsStable,
+      available: techniqueAvailable,
+      base: techniqueAvailable ? `${techniqueSessions.length} sesiones con ≥400 m y ≥16 largos válidos de crol: primer vs último cuarto. Mediana de cambios por sesión. Evidencia por longitud de piscina: ${techniqueSummary}.` :
+        `${techniqueSessions.length} sesiones elegibles en 90 días; requiere ≥3 con ≥400 m y ≥16 largos de crol del tamaño de piscina, tiempos válidos y strokes positivos. Sin datos no se estima a partir de promedios de sesión.`,
+      description: 'Últimas cinco sesiones elegibles; compara largos de crol del mismo tamaño, aunque haya series, pausas y otros estilos entre ellos. Objetivo: ralentización ≤5% y pérdida de DPS ≤5%. Puntúa el peor deterioro (100% hasta 5%, 0% a 15%); SPL, LPM y SWOLF son apoyo sin duplicar puntos. Intensidad, calentamiento, virajes y descansos influyen: describe estabilidad de sesión, no fatiga en nado continuo.',
+      milestones: [{ label: 'Ralentización ≤5%', done: paceStable },
+        { label: 'Pérdida de DPS ≤5%', done: dpsStable }],
+    },
+  ].map(check => ({
+    ...check,
+    status: !check.available ? 'pending' : check.complete ? 'completed'
+      : check.progress > 0 ? 'progress' : 'pending',
+  }));
+  const evidenceWeight = definitions.filter(check => check.available).reduce((sum, check) => sum + check.weight, 0);
+  const score = hasHistory ? definitions.reduce((sum, check) => sum + check.weight * (check.progress ?? 0) / 100, 0) : null;
+  return {
+    score, evidenceWeight, completed: definitions.filter(check => check.status === 'completed').length,
+    checks: definitions,
+    technique: { samples: techniqueSessions.length, paceFade, dpsLoss, sessions: techniqueSessions },
+  };
+}
+
+export function oceanmanReadinessHistory(activities, asOf = new Date(), lengths = []) {
+  const rows = swimming(activities).filter(a => localDate(a.date) <= asOf);
+  const dates = [...new Set(rows.map(a => dateKey(localDate(a.date))))].sort();
+  if (!dates.length) return [];
+  const latest = dateKey(asOf);
+  if (dates.at(-1) !== latest) dates.push(latest);
+  return dates.map(date => {
+    const end = new Date(Math.min(localDate(`${date}T23:59:59.999`).getTime(), asOf.getTime()));
+    const readiness = oceanmanReadiness(rows, end, lengths);
+    return { date, score: readiness.score, evidenceWeight: readiness.evidenceWeight };
+  });
 }
 
 function mean(values) {

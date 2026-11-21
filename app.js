@@ -1,4 +1,4 @@
-import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, weeklyMetrics, trainingHeatmap, personalBests, sessionRankings, trainingSummary, strokeMix, sortSessions, filterLogbook } from './analytics.mjs';
+import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, weeklyMetrics, trainingHeatmap, personalBests, recordDistanceGroups, openWaterRecordDistances, trainingSummary, strokeMix, sortSessions, filterLogbook, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory } from './analytics.mjs';
 import { scatterplot, distribution, weeklyChart, heatmap, paceLabel, swolfChart, routeMap } from './charts.js';
 import { renderActivity } from './activity.js';
 
@@ -12,10 +12,15 @@ let logbookRows = [];
 let currentPoll = null;
 let tableSort = null;
 let recordGroup = 'freestyle';
+let checkFilter = 'all';
+let trendPeriod = 'day';
+let readinessChecks = [];
+let readinessHistory = [];
 let activityRequest = 0;
 let activityOpenedFromDashboard = false;
 let activityReturnFocus = null;
 const format = (value, digits = 1) => value == null || !Number.isFinite(value) ? '--' : new Intl.NumberFormat('en', { maximumFractionDigits: digits }).format(value);
+const oceanmanFormat = (value, digits = 1) => value == null || !Number.isFinite(value) ? '--' : new Intl.NumberFormat('es-ES', { maximumFractionDigits: digits }).format(value);
 const percent = value => value == null ? '--' : `${format(value, 1)}%`;
 const time = value => {
   if (value == null) return '--';
@@ -122,20 +127,16 @@ function render() {
   renderWeekly(scope.filter(a => (include || !a.excluded) && localDate(a.date) <= to), from, to);
   heatmap($('heatmap'), trainingHeatmap(visible));
   swolfChart($('swolf-chart'), visible);
-  renderSummary(trainingSummary(visible));
+  renderSummary(trainingSummary(visible), annotated.filter(a => a.type === 'open_water').length);
   renderStrokeMix(strokeMix(visible, dataset.lengths));
   renderRoutes();
   const limit = Number($('record-limit').value);
-  const metric = $('ranking-metric').value;
-  const metricLabel = metric === 'distance' ? 'Longest distance' : metric === 'pace' ? 'Fastest pace' : 'Lowest SWOLF';
-  $('ranking-title').textContent = metricLabel;
-  $('ranking-count').textContent = `TOP ${limit}`;
-  renderRankings(sessionRankings(visible, metric, limit), metric);
   renderRecords(personalBests(visible, dataset.lengths, limit));
   renderPoolOptions();
   applyLogbookFilters();
   renderQuality(dated);
   renderWarnings();
+  renderOceanman(annotated.filter(a => include || !a.excluded));
 }
 function renderWeekly(scope, from, to) {
   const metric = $('weekly-metric').value;
@@ -188,7 +189,7 @@ function renderRoutes() {
   $('route-count').textContent = `${routes.length} recorded routes in this view. Hover or focus a route for session details.`;
   routeMap($('route-map'), routes, dataset.routePoints ?? []);
 }
-function renderSummary(summary) {
+function renderSummary(summary, savedOpenWater) {
   const container = $('environment-summary');
   container.replaceChildren();
   const cards = [
@@ -205,96 +206,353 @@ function renderSummary(summary) {
     count.textContent = `${cardData.sessions} sessions`;
     const share = document.createElement('small');
     share.textContent = `${percent(divide(cardData.sessions * 100, summary.totalSessions))} of filtered sessions`;
-    const stats = document.createElement('p');
-    stats.textContent = `${format(cardData.distance / 1000, 2)} km total / ${format(cardData.averageDistance, 0)} m average / ${paceLabel(cardData.averagePace)} /100 m avg pace / ${format(cardData.averageSwolf, 1)} avg SWOLF`;
+    const stats = document.createElement('dl');
+    stats.className = 'environment-metrics';
+    const metrics = [
+      ['Total distance', `${format(cardData.distance / 1000, 2)} km`],
+      ['Avg distance', `${format(cardData.averageDistance, 0)} m`],
+      ['Avg pace', `${paceLabel(cardData.averagePace)} /100 m`],
+      ['Avg moving time', time(cardData.averageMovingTime)],
+      ['Avg HR', `${format(cardData.averageHeartRate, 0)} bpm`],
+      ['Avg SPM', format(cardData.averageSpm, 1)],
+      ['Avg DPS', `${format(cardData.averageDps, 2)} m/stroke`],
+      ['Avg efficiency', format(cardData.averageEfficiency, 2)],
+    ];
+    if (cardData.title !== 'Open water') metrics.push(
+      ['Avg SWOLF', format(cardData.averageSwolf, 1)],
+      ['Avg SPL', format(cardData.averageSpl, 1)],
+      ['Avg TPL', `${format(cardData.averageTpl, 1)} s`],
+      ['Avg LPM', format(cardData.averageLpm, 1)],
+    );
+    for (const [label, value] of metrics) {
+      const item = document.createElement('div');
+      const term = document.createElement('dt');
+      const definition = document.createElement('dd');
+      term.textContent = label;
+      definition.textContent = value;
+      item.append(term, definition);
+      stats.append(item);
+    }
     card.append(heading, count, share, stats);
+    if (cardData.title === 'Open water' && !cardData.sessions) {
+      const note = document.createElement('p');
+      note.textContent = savedOpenWater
+        ? `${savedOpenWater} open-water sessions saved, but none match the current filters. Check timeframe, environment and excluded sessions.`
+        : 'No open-water sessions are saved. Sync Garmin to retrieve your swimming history.';
+      card.append(note);
+    }
     container.append(card);
   }
   if (!cards.length) container.textContent = 'No sessions match these filters.';
 }
-function renderRankings(entries, metric) {
-  const container = $('ranking-list');
+function renderOceanman(activities) {
+  const now = new Date();
+  const readiness = oceanmanReadiness(activities, now, dataset.lengths);
+  readinessChecks = readiness.checks;
+  readinessHistory = oceanmanReadinessHistory(activities, now, dataset.lengths);
+  const percentValue = value => value == null ? '--' : `${oceanmanFormat(value, 1)}%`;
+  $('readiness-score').textContent = percentValue(readiness.score);
+  $('readiness-passed').textContent = `${readiness.completed} de 6 checks superados`;
+  $('readiness-coverage').textContent = `Cobertura: ${readiness.evidenceWeight}% del índice con datos evaluables`;
+
+  const rolling = $('rolling-windows');
+  rolling.replaceChildren();
+  for (const window of oceanmanRollingVolumes(activities, now)) {
+    const card = document.createElement('article');
+    card.className = 'rolling-card';
+    const header = document.createElement('header');
+    const heading = document.createElement('h3');
+    heading.textContent = `Últimos ${window.days} días`;
+    const target = document.createElement('span');
+    target.textContent = `Meta ${oceanmanFormat(window.targetKm, 0)} km`;
+    header.append(heading, target);
+    const total = document.createElement('strong');
+    total.textContent = oceanmanFormat(window.actualKm, 1);
+    const unit = document.createElement('small');
+    unit.textContent = ' km';
+    total.append(unit);
+    const track = document.createElement('div');
+    track.className = 'progress-track';
+    track.setAttribute('role', 'progressbar');
+    track.setAttribute('aria-label', `Progreso últimos ${window.days} días`);
+    track.setAttribute('aria-valuemin', '0');
+    track.setAttribute('aria-valuemax', '100');
+    track.setAttribute('aria-valuenow', String(Math.round(window.progress)));
+    const fill = document.createElement('span');
+    fill.style.width = `${window.progress}%`;
+    track.append(fill);
+    const caption = document.createElement('p');
+    caption.textContent = window.label;
+    card.append(header, total, track, caption);
+    rolling.append(card);
+  }
+  renderReadinessChecks(readinessChecks);
+  renderReadinessTrend(readinessHistory);
+  renderOceanmanPlan(oceanmanPlanRows(activities, now), now);
+}
+function renderReadinessChecks(checks) {
+  const counts = Object.fromEntries(['completed', 'progress', 'pending'].map(state =>
+    [state, checks.filter(check => check.status === state).length]));
+  for (const [state, count] of Object.entries(counts)) {
+    const button = document.querySelector(`[data-check-filter="${state}"]`);
+    button.textContent = `${state === 'completed' ? 'Superados' : state === 'progress' ? 'En progreso' : 'Pendientes'} (${count})`;
+  }
+  const container = $('readiness-checks');
   container.replaceChildren();
-  if (!entries.length) {
+  for (const [index, check] of checks.entries()) {
+    if (checkFilter !== 'all' && check.status !== checkFilter) continue;
+    const card = document.createElement('article');
+    card.className = 'readiness-check';
+    card.dataset.status = check.status;
+    const top = document.createElement('div');
+    top.className = 'readiness-check-top';
+    const titleWrap = document.createElement('div');
+    const title = document.createElement('h3');
+    title.textContent = `#${index + 1} ${check.title}`;
+    const weight = document.createElement('span');
+    weight.className = 'weight';
+    weight.textContent = `${check.weight}% del índice`;
+    titleWrap.append(title, weight);
+    const statusLabel = document.createElement('span');
+    statusLabel.className = 'check-status';
+    statusLabel.dataset.status = check.status;
+    statusLabel.textContent = check.status === 'completed' ? 'Superado'
+      : check.status === 'progress' ? 'En progreso' : 'Pendiente';
+    top.append(titleWrap, statusLabel);
+    const value = document.createElement('div');
+    value.className = 'check-value';
+    const current = document.createElement('strong');
+    current.textContent = check.display;
+    const progress = document.createElement('span');
+    progress.textContent = percentValueForCheck(check.progress);
+    value.append(current, progress);
+    const track = document.createElement('div');
+    track.className = 'progress-track';
+    track.setAttribute('role', 'progressbar');
+    track.setAttribute('aria-label', `Progreso de ${check.title}`);
+    track.setAttribute('aria-valuemin', '0');
+    track.setAttribute('aria-valuemax', '100');
+    if (check.progress != null) track.setAttribute('aria-valuenow', String(Math.round(check.progress)));
+    const fill = document.createElement('span');
+    fill.style.width = `${check.progress ?? 0}%`;
+    track.append(fill);
+    const description = document.createElement('p');
+    description.textContent = check.description;
+    const base = document.createElement('p');
+    base.className = 'check-base';
+    base.textContent = `Base: ${check.base}`;
+    const milestones = document.createElement('div');
+    milestones.className = 'check-milestones';
+    for (const milestone of check.milestones) {
+      const item = document.createElement('span');
+      item.className = 'check-milestone';
+      item.dataset.done = String(milestone.done);
+      item.textContent = `${milestone.done ? '✓ ' : ''}${milestone.label}`;
+      milestones.append(item);
+    }
+    card.append(top, value, track, description, base, milestones);
+    container.append(card);
+  }
+  if (!container.childElementCount) {
     const empty = document.createElement('p');
     empty.className = 'record-empty';
-    empty.textContent = 'No eligible sessions in this view.';
+    empty.textContent = 'No hay checks en este estado.';
+    container.append(empty);
+  }
+}
+function percentValueForCheck(value) {
+  return value == null ? '--' : `${oceanmanFormat(value, 0)}%`;
+}
+function renderReadinessTrend(history) {
+  const container = $('readiness-trend');
+  container.replaceChildren();
+  const pointsByPeriod = new Map();
+  for (const point of history) {
+    const date = localDate(`${point.date}T12:00:00`);
+    const key = trendPeriod === 'day' ? point.date
+      : trendPeriod === 'week' ? dateKey(new Date(date.getTime() - ((date.getDay() + 6) % 7) * 86400000))
+        : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    pointsByPeriod.set(key, point);
+  }
+  const points = [...pointsByPeriod.values()];
+  if (!points.length) {
+    const empty = document.createElement('p');
+    empty.className = 'trend-empty';
+    empty.textContent = 'Importa tus actividades para empezar a ver la evolución de tu preparación.';
     container.append(empty);
     return;
   }
-  for (const [index, entry] of entries.entries()) {
-    const row = document.createElement('div');
-    row.className = 'podium';
-    const rank = document.createElement('span');
-    rank.className = 'rank';
-    rank.textContent = String(index + 1).padStart(2, '0');
-    const details = document.createElement('a');
-    details.href = `#activity=${encodeURIComponent(entry.id)}`;
-    details.className = 'activity-link';
-    details.setAttribute('aria-label', `Analyze activity from ${entry.date?.slice(0, 10)}`);
-    details.textContent = `${entry.date?.slice(0, 10)} / ${entry.type === 'pool' ? 'Pool' : 'Open water'}`;
-    const pace = document.createElement('small');
-    pace.textContent = `${paceLabel(entry.pace)} /100 m`;
-    details.append(pace);
-    const value = document.createElement('strong');
-    value.textContent = metric === 'distance' ? `${format(entry.value / 1000, 2)} km`
-      : metric === 'pace' ? `${paceLabel(entry.value)}/100` : format(entry.value, 1);
-    row.append(rank, details, value);
-    container.append(row);
+  const width = 900, height = 300, left = 54, right = 22, top = 24, bottom = 42;
+  const plotWidth = width - left - right, plotHeight = height - top - bottom;
+  const timestamps = points.map(point => localDate(`${point.date}T12:00:00`).getTime());
+  const span = timestamps.at(-1) - timestamps[0];
+  const x = index => left + (span ? (timestamps[index] - timestamps[0]) / span * plotWidth : plotWidth / 2);
+  const y = score => top + (100 - score) * plotHeight / 100;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', `Evolución ${trendPeriod === 'day' ? 'diaria' : trendPeriod === 'week' ? 'semanal' : 'mensual'} del índice de preparación`);
+  const title = document.createElementNS(svg.namespaceURI, 'title');
+  title.textContent = 'Evolución histórica del porcentaje de preparación Oceanman';
+  svg.append(title);
+  for (const guide of [50, 70, 85]) {
+    const line = document.createElementNS(svg.namespaceURI, 'line');
+    line.setAttribute('x1', String(left)); line.setAttribute('x2', String(width - right));
+    line.setAttribute('y1', String(y(guide))); line.setAttribute('y2', String(y(guide)));
+    line.setAttribute('class', 'guide');
+    svg.append(line);
+    const label = document.createElementNS(svg.namespaceURI, 'text');
+    label.setAttribute('x', String(left - 8)); label.setAttribute('y', String(y(guide) + 4));
+    label.setAttribute('text-anchor', 'end'); label.setAttribute('class', 'guide-label');
+    label.textContent = `${guide}%`;
+    svg.append(label);
   }
+  const path = document.createElementNS(svg.namespaceURI, 'path');
+  path.setAttribute('class', 'readiness-line');
+  path.setAttribute('d', points.map((point, index) =>
+    `${index ? 'L' : 'M'}${x(index).toFixed(1)},${y(point.score ?? 0).toFixed(1)}`).join(' '));
+  svg.append(path);
+  const stride = Math.max(1, Math.ceil(points.length / 80));
+  for (let index = 0; index < points.length; index += stride) {
+    const point = points[index];
+    const circle = document.createElementNS(svg.namespaceURI, 'circle');
+    circle.setAttribute('class', 'readiness-point');
+    circle.setAttribute('cx', String(x(index))); circle.setAttribute('cy', String(y(point.score ?? 0)));
+    circle.setAttribute('r', '3');
+    const detail = document.createElementNS(svg.namespaceURI, 'title');
+    detail.textContent = `${point.date}: ${oceanmanFormat(point.score, 1)}% · cobertura ${point.evidenceWeight}%`;
+    circle.append(detail);
+    svg.append(circle);
+  }
+  for (const index of [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])]) {
+    const date = localDate(`${points[index].date}T12:00:00`);
+    const label = document.createElementNS(svg.namespaceURI, 'text');
+    label.setAttribute('x', String(x(index))); label.setAttribute('y', String(height - 12));
+    label.setAttribute('text-anchor', index === 0 ? 'start' : index === points.length - 1 ? 'end' : 'middle');
+    label.setAttribute('class', 'date-label');
+    label.textContent = date.toLocaleDateString('es-ES');
+    svg.append(label);
+  }
+  container.append(svg);
 }
+function renderOceanmanPlan(rows, now) {
+  const headers = ['# WEEK', 'WEEK', 'KM Obj', 'KM Reals', 'Diff',
+    'Dilluns', 'Dimarts', 'Dimecres', 'Dijous', 'Divendres', 'Dissabte', 'Diumenge',
+    '# swims', 'min', 'avg', 'max', 'OW'];
+  const header = document.createElement('tr');
+  for (const label of headers) {
+    const cell = document.createElement('th');
+    cell.scope = 'col';
+    cell.textContent = label;
+    header.append(cell);
+  }
+  $('oceanman-plan-head').replaceChildren(header);
+  const today = new Date(now);
+  const currentMonday = new Date(today);
+  currentMonday.setDate(currentMonday.getDate() - (currentMonday.getDay() + 6) % 7);
+  const currentKey = dateKey(currentMonday);
+  const completedWeeks = rows.filter(row => row.week < currentKey).length;
+  $('plan-progress').textContent = `${completedWeeks} / ${rows.length} semanas cerradas`;
+  const body = document.createDocumentFragment();
+  const maxDailyKm = Math.max(0, ...rows.flatMap(row => row.dailyKm ?? []));
+  $('plan-color-scale').textContent = `Escala diaria: 0 → ${oceanmanFormat(maxDailyKm, 2)} km (más azul = más distancia).`;
+  const km = value => value == null ? '--' : oceanmanFormat(value, 1);
+  const dateFormatter = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  for (const row of rows) {
+    const tr = document.createElement('tr');
+    tr.className = row.week === currentKey ? 'current-week'
+      : row.week < currentKey ? 'completed-week' : 'future-week';
+    const weekStart = localDate(`${row.week}T12:00:00`);
+    const values = [row.number, dateFormatter.format(weekStart), km(row.targetKm), km(row.actualKm),
+      row.diffKm == null ? '--' : `${row.diffKm > 0 ? '+' : ''}${km(row.diffKm)}`,
+      ...(row.dailyKm ?? Array(7).fill(null)).map(km),
+      row.swims == null ? '--' : row.swims, km(row.minKm), km(row.averageKm), km(row.maxKm), km(row.openWaterKm)];
+    for (const [index, value] of values.entries()) {
+      const td = document.createElement('td');
+      td.textContent = String(value);
+      if (index === 4 && row.diffKm != null) td.className = row.diffKm >= 0 ? 'positive-diff' : 'negative-diff';
+      if (index >= 5 && index <= 11) {
+        const dailyKm = row.dailyKm?.[index - 5];
+        if (dailyKm > 0 && maxDailyKm > 0) {
+          td.className = 'day-volume';
+          td.style.setProperty('--day-intensity', `${dailyKm / maxDailyKm * 100}%`);
+          td.title = `${headers[index]}: ${oceanmanFormat(dailyKm, 2)} km`;
+        }
+      }
+      tr.append(td);
+    }
+    body.append(tr);
+  }
+  $('oceanman-plan-body').replaceChildren(body);
+}
+function podiumTime(duration, label) {
+  const result = document.createElement('span');
+  result.className = 'podium-time';
+  const caption = document.createElement('small');
+  caption.textContent = label;
+  const value = document.createElement('strong');
+  value.textContent = Math.round(duration) >= 3600 ? time(duration) : paceLabel(duration);
+  result.append(caption, value);
+  return result;
+}
+
 function renderRecords(records) {
   $('record-cards').replaceChildren();
-  const groups = {
-    freestyle: key => key.endsWith(' freestyle'),
-    breaststroke: key => key.endsWith(' breaststroke'),
-    backstroke: key => key.endsWith(' backstroke'),
-    butterfly: key => key.endsWith(' butterfly'),
-    im: key => key.endsWith(' IM'),
-    mixed: key => /^\d+m$/.test(key),
-    open_water: key => key.endsWith(' open water'),
-    session: key => key.endsWith(' session'),
-  };
-  for (const [category, entries] of Object.entries(records).filter(([key]) => groups[recordGroup](key))) {
-    const card = document.createElement('article');
-    card.className = 'record-card';
-    const heading = document.createElement('h3');
-    heading.textContent = category.replace(/ (freestyle|breaststroke|backstroke|butterfly)$/, '');
-    card.append(heading);
-    const attemptCount = records.attempts?.[category];
-    if (attemptCount != null) {
+  const openWater = recordGroup === 'open_water';
+  $('record-method').textContent = openWater
+    ? 'Whole open-water activities within ±7% of the target distance, ranked by moving time. Actual distance and moving pace are shown; shorter swims within the range may rank faster. No splits are used.'
+    : 'Pool efforts use exact-distance windows of recorded FIT lengths, including rests. One best effort per session. IM requires equal butterfly / backstroke / breaststroke / freestyle legs in that order. These are locally calculated efforts, not Garmin official records.';
+  const groups = openWater ? [{ title: 'Open water', distances: openWaterRecordDistances.map(item => item.distance) }]
+    : recordGroup === 'im' ? [{ title: 'Individual medley', distances: [100, 200, 400] }] : recordDistanceGroups;
+  for (const group of groups) {
+    const section = document.createElement('section');
+    section.className = 'record-distance-group';
+    const title = document.createElement('h3');
+    title.textContent = group.title;
+    const grid = document.createElement('div');
+    grid.className = 'record-grid';
+    section.append(title, grid);
+    for (const distance of group.distances) {
+      const category = `${distance}m ${openWater ? 'open water' : recordGroup === 'im' ? 'IM' : recordGroup}`;
+      const entries = records[category];
+      const card = document.createElement('article');
+      card.className = 'record-card';
+      const heading = document.createElement('h3');
+      heading.textContent = openWater ? openWaterRecordDistances.find(item => item.distance === distance).label
+        : recordGroup === 'im' ? category : `${distance}m`;
+      card.append(heading);
+      const attemptCount = records.attempts[category];
       const attempts = document.createElement('small');
       attempts.className = 'record-attempt-count';
-      attempts.textContent = `${attemptCount} ${attemptCount === 1 ? 'attempt' : 'attempts'}`;
+      attempts.textContent = openWater ? `${attemptCount} qualifying ${attemptCount === 1 ? 'session' : 'sessions'}`
+        : `${attemptCount} ${attemptCount === 1 ? 'attempt' : 'attempts'}`;
       card.append(attempts);
+      if (!entries.length) {
+        const empty = document.createElement('p');
+        empty.className = 'record-empty';
+        empty.textContent = openWater ? 'No qualifying open-water sessions in this view.' : 'No qualifying FIT lengths. No estimated record.';
+        card.append(empty);
+      }
+      entries.forEach((entry, index) => {
+        const row = document.createElement('div');
+        row.className = 'podium';
+        const rank = document.createElement('span');
+        rank.className = 'rank';
+        rank.textContent = String(index + 1).padStart(2, '0');
+        const details = document.createElement('a');
+        details.href = `#activity=${encodeURIComponent(entry.id)}`;
+        details.className = 'activity-link';
+        details.setAttribute('aria-label', `Analyze activity from ${entry.date?.slice(0, 10)}`);
+        details.textContent = entry.date?.slice(0, 10);
+        const stats = document.createElement('small');
+        stats.textContent = `${openWater ? `${format(entry.distance, 2)} m · ` : ''}${paceLabel(entry.pace)} /100 m`;
+        details.append(stats);
+        row.append(rank, details, podiumTime(entry.duration, openWater ? 'Moving time' : 'Effort time'));
+        card.append(row);
+      });
+      grid.append(card);
     }
-    if (!entries.length) {
-      const empty = document.createElement('p');
-      empty.className = 'record-empty';
-      empty.textContent = attemptCount == null ? 'No eligible sessions.' : 'No qualifying FIT lengths. No estimated record.';
-      card.append(empty);
-    }
-    entries.forEach((entry, index) => {
-      const row = document.createElement('div');
-      row.className = 'podium';
-      const rank = document.createElement('span');
-      rank.className = 'rank';
-      rank.textContent = String(index + 1).padStart(2, '0');
-      const details = document.createElement('a');
-      details.href = `#activity=${encodeURIComponent(entry.id)}`;
-      details.className = 'activity-link';
-      details.setAttribute('aria-label', `Analyze activity from ${entry.date?.slice(0, 10)}`);
-      details.textContent = entry.date?.slice(0, 10);
-      const pace = document.createElement('small');
-      pace.textContent = `${paceLabel(entry.pace)} /100 m`;
-      details.append(pace);
-      const value = document.createElement('strong');
-      value.textContent = category.startsWith('Longest ') ? `${format(entry.value / 1000, 2)} km`
-        : category.startsWith('Fastest ') ? `${paceLabel(entry.value)}/100` : paceLabel(entry.value);
-      row.append(rank, details, value);
-      card.append(row);
-    });
-    $('record-cards').append(card);
+    $('record-cards').append(section);
   }
 }
 function renderTable() {
@@ -544,7 +802,7 @@ for (const tab of tabs) {
     }
   });
 }
-for (const id of ['period', 'environment', 'outliers', 'from', 'to', 'record-limit', 'ranking-metric']) {
+for (const id of ['period', 'environment', 'outliers', 'from', 'to', 'record-limit']) {
   $(id).addEventListener('change', () => {
     const custom = $('period').value === 'custom';
     $('from-label').hidden = !custom;
@@ -560,6 +818,24 @@ $('clear-logbook').addEventListener('click', () => {
   $('pool-filter').value = 'all';
   applyLogbookFilters();
 });
+for (const button of document.querySelectorAll('[data-check-filter]')) {
+  button.addEventListener('click', () => {
+    checkFilter = button.dataset.checkFilter;
+    for (const option of document.querySelectorAll('[data-check-filter]')) {
+      option.setAttribute('aria-pressed', String(option === button));
+    }
+    renderReadinessChecks(readinessChecks);
+  });
+}
+for (const button of document.querySelectorAll('[data-trend-period]')) {
+  button.addEventListener('click', () => {
+    trendPeriod = button.dataset.trendPeriod;
+    for (const option of document.querySelectorAll('[data-trend-period]')) {
+      option.setAttribute('aria-pressed', String(option === button));
+    }
+    renderReadinessTrend(readinessHistory);
+  });
+}
 for (const button of $('record-groups').querySelectorAll('button')) {
   button.addEventListener('click', () => {
     recordGroup = button.dataset.recordGroup;
@@ -709,8 +985,6 @@ if (cloud) {
   $('key-label').hidden = true;
   $('key').hidden = true;
   $('key').required = false;
-  $('storage-label').textContent = 'CLOUD / PRIVATE';
-  $('storage-note').textContent = 'Data is stored in PostgreSQL. Your Garmin key stays on the server.';
   $('connection-note').textContent = 'The Garmin key is configured as a server environment variable. Swim metrics, pool lengths and available GPS routes are stored in PostgreSQL. Keep Vercel Deployment Protection enabled for all deployments.';
   $('privacy-note').textContent = 'SWIMLAB / Independent personal dashboard, not affiliated with Garmin. Cloud storage contains sensitive health and GPS data. Protect all deployments and database access.';
 }

@@ -177,10 +177,20 @@ function renderSummary(container, activity, details) {
   container.append(overview);
 }
 
+function intervalMetrics(values) {
+  const list = node('span', 'interval-metrics');
+  for (const [label, value] of values) {
+    const item = node('span');
+    item.append(node('small', '', label), node('strong', '', value));
+    list.append(item);
+  }
+  return list;
+}
+
 function renderLengths(container, details) {
   container.append(node('h2', '', 'Inside the session'), node('p', 'hint', 'Blocks are detected from consecutive active lengths of the same stroke, broken by recorded rest, >15 s gaps, missing lengths or overlaps. They are not official Garmin laps or a claimed workout prescription.'));
   if (!details.rows.length) { container.append(node('p', 'empty', 'No FIT lengths are available for this activity.')); return; }
-  const blocks = panel(container, 'Swim intervals', 'Expand a set to see its lengths. Recorded rests are shown separately from gaps with no data.');
+  const blocks = panel(container, 'Swim intervals', 'Expand each set for more metrics and its lengths. Metrics use recorded active lengths only; -- means unavailable. Recorded rests and unrecorded gaps are separate.');
   lengthRibbon(blocks, details.rows, details.origin);
   const list = node('div', 'swim-intervals');
   blocks.append(list);
@@ -202,7 +212,14 @@ function renderLengths(container, details) {
       node('small', '', `${block.rows.length} lengths`));
     const pace = node('span', 'interval-pace');
     pace.append(node('strong', '', time(block.duration)), node('small', '', `${paceLabel(block.pace)} /100 m`));
-    label.append(elapsed, stroke, node('strong', '', `${format(block.distance)} m`), pace);
+    const m = block.metrics;
+    label.append(elapsed, stroke, node('strong', '', `${format(block.distance)} m`), pace,
+      intervalMetrics([['DPS (m/stroke)', format(m.dps)], ['SPM', format(m.spm)], ['SWOLF', format(m.swolf)]]));
+    const extra = intervalMetrics([
+      ['Strokes', format(m.strokes)], ['SPL', format(m.spl)], ['TPL (s)', format(m.tpl)],
+      ['LPM', format(m.lpm)], ['Efficiency', format(m.efficiency)], ['Elapsed span', time(block.elapsed)],
+      ['FIT timer', time(m.timerTime)], ['HR (bpm)', format(m.heartRate)], ['HR samples', format(m.hrSamples)],
+    ]);
     const ribbon = node('div', 'block-lengths');
     for (const r of block.rows) {
       const tile = node('span', 'length-tile', r.index);
@@ -211,7 +228,9 @@ function renderLengths(container, details) {
       tile.setAttribute('aria-label', tile.title);
       ribbon.append(tile);
     }
-    row.append(label, ribbon);
+    const detail = node('div', 'interval-detail');
+    detail.append(extra, ribbon);
+    row.append(label, detail);
     list.append(row);
   }
   const grid = node('div', 'chart-grid');
