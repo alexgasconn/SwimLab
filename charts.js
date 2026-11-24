@@ -97,22 +97,29 @@ export function metricChart(container, rows, options) {
 }
 
 export function recordPaceChart(container, rows) {
-  const svg = chart(container, 'Pace of the fastest-time personal best at each distance. Lower is faster.', !rows.length);
-  if (!svg) return;
-  const distances = rows.map(row => row.distance);
-  const values = rows.map(row => row.entry.pace);
-  const xMin = Math.min(...distances), xMax = Math.max(...distances);
+  const valid = rows.map((row, index) => ({ ...row, index })).filter(row => Number.isFinite(row.entry?.pace));
+  const svg = chart(container, 'Pace of the fastest-time personal best at each target distance. Distances are equally spaced. Lower is faster.', !valid.length);
+  if (!svg) {
+    const distances = document.createElement('p');
+    distances.className = 'hint';
+    distances.textContent = `Target distances (m): ${rows.map(row => row.distance).join(', ')}`;
+    container.append(distances);
+    return;
+  }
+  const values = valid.map(row => row.entry.pace);
   const min = Math.min(...values), max = Math.max(...values);
-  const xPadding = (xMax - xMin) * 0.04 || Math.max(10, xMin * 0.05);
   const yPadding = (max - min) * 0.12 || Math.max(1, min * 0.05);
-  const { x, y } = axes(svg, Math.max(0, xMin - xPadding), xMax + xPadding, max + yPadding,
-    'Target distance (m)', 'Pace /100 m', number, paceLabel, Math.max(0, min - yPadding));
-  if (rows.length > 1) svg.append(element('polyline', {
-    points: rows.map(row => `${x(row.distance)},${y(row.entry.pace)}`).join(' '),
+  const { x, y } = axes(svg, -0.5, Math.max(0.5, rows.length - 0.5), max + yPadding,
+    'Target distance (m)', 'Pace /100 m', () => '', paceLabel, Math.max(0, min - yPadding));
+  for (const [index, row] of rows.entries()) {
+    svg.append(element('text', { x: x(index), y: H - margin.bottom + 22, 'text-anchor': 'middle', class: 'axis-text' }, String(row.distance)));
+  }
+  if (valid.length > 1) svg.append(element('polyline', {
+    points: valid.map(row => `${x(row.index)},${y(row.entry.pace)}`).join(' '),
     fill: 'none', stroke: colors.pool, 'stroke-width': 2,
   }));
-  for (const { distance, entry } of rows) {
-    const dot = element('circle', { cx: x(distance), cy: y(entry.pace), r: 5, fill: colors.pool, class: 'data-point' });
+  for (const { distance, entry, index } of valid) {
+    const dot = element('circle', { cx: x(index), cy: y(entry.pace), r: 5, fill: colors.pool, class: 'data-point' });
     tooltip(dot, `${distance} m · ${paceLabel(entry.pace)}/100 m · ${entry.date?.slice(0, 10)}${entry.distance ? ` · actual ${number(entry.distance)} m` : ''}`);
     const link = element('a', { href: `#activity=${encodeURIComponent(entry.id)}`, 'aria-label': `Analyze ${entry.name}` });
     link.append(dot);

@@ -506,31 +506,7 @@ function renderRecords(records) {
     : recordGroup === 'im' ? [{ title: 'Individual medley', distances: [100, 200, 400] }] : recordDistanceGroups;
   const distances = groups.flatMap(group => group.distances);
   const categoryKey = distance => `${distance}m ${openWater ? 'open water' : recordGroup === 'im' ? 'IM' : recordGroup}`;
-  recordPaceChart($('record-pace-chart'), distances.flatMap(distance => {
-    const entry = records[categoryKey(distance)][0];
-    return entry ? [{ distance, entry }] : [];
-  }));
-  const history = $('record-history');
-  history.replaceChildren();
-  for (const distance of distances) {
-    const rows = personalBestHistory(records[categoryKey(distance)], $('record-period').value);
-    if (!rows.length) continue;
-    const panel = document.createElement('article');
-    panel.className = 'panel';
-    const title = document.createElement('h3');
-    title.textContent = openWater ? openWaterRecordDistances.find(item => item.distance === distance).label : `${distance} m`;
-    const chart = document.createElement('div');
-    chart.className = 'chart';
-    panel.append(title, chart);
-    history.append(panel);
-    recordHistoryChart(chart, rows, `${title.textContent} ${openWater ? 'open water' : recordGroup === 'im' ? 'IM' : recordGroup}`, $('record-period').value);
-  }
-  if (!history.childElementCount) {
-    const empty = document.createElement('p');
-    empty.className = 'empty';
-    empty.textContent = 'No qualifying efforts in this view.';
-    history.append(empty);
-  }
+  recordPaceChart($('record-pace-chart'), distances.map(distance => ({ distance, entry: records[categoryKey(distance)][0] })));
   for (const group of groups) {
     const section = document.createElement('section');
     section.className = 'record-distance-group';
@@ -577,6 +553,47 @@ function renderRecords(records) {
         row.append(rank, details, podiumTime(entry.duration, openWater ? 'Moving time' : 'Effort time'));
         card.append(row);
       });
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'secondary record-history-toggle';
+      toggle.textContent = 'Show progress';
+      toggle.setAttribute('aria-label', `Show progress for ${category}`);
+      toggle.setAttribute('aria-expanded', 'false');
+      const history = document.createElement('div');
+      history.id = `record-history-${recordGroup}-${distance}`;
+      history.hidden = true;
+      toggle.setAttribute('aria-controls', history.id);
+      const controls = document.createElement('div');
+      controls.className = 'record-history-controls';
+      const label = document.createElement('label');
+      label.textContent = 'Group by';
+      const select = document.createElement('select');
+      select.setAttribute('aria-label', `Group ${heading.textContent} progress by`);
+      for (const [value, name] of [['month', 'Month'], ['week', 'Week']]) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = name;
+        select.append(option);
+      }
+      label.append(select);
+      controls.append(label);
+      const note = document.createElement('p');
+      note.className = 'hint';
+      note.textContent = 'Teal: best time in each period with an effort. Gold: best time so far within the current filters. Weeks start on Monday; empty periods have no point.';
+      const chart = document.createElement('div');
+      chart.className = 'chart record-history-chart';
+      const renderHistory = () => recordHistoryChart(chart, personalBestHistory(records[category], select.value), category, select.value);
+      select.addEventListener('change', renderHistory);
+      toggle.addEventListener('click', () => {
+        history.hidden = !history.hidden;
+        toggle.setAttribute('aria-expanded', String(!history.hidden));
+        toggle.textContent = history.hidden ? 'Show progress' : 'Hide progress';
+        toggle.setAttribute('aria-label', `${history.hidden ? 'Show' : 'Hide'} progress for ${category}`);
+        card.classList.toggle('history-open', !history.hidden);
+        if (!history.hidden) renderHistory();
+      });
+      history.append(controls, note, chart);
+      card.append(toggle, history);
       grid.append(card);
     }
     $('record-cards').append(section);
@@ -866,13 +883,18 @@ for (const button of document.querySelectorAll('[data-trend-period]')) {
 for (const button of $('record-groups').querySelectorAll('button')) {
   button.addEventListener('click', () => {
     recordGroup = button.dataset.recordGroup;
+    $('record-pace-group').value = recordGroup;
     for (const option of $('record-groups').querySelectorAll('button')) {
       option.setAttribute('aria-pressed', String(option === button));
     }
     if (recordResults) renderRecords(recordResults);
   });
 }
-$('record-period').addEventListener('change', () => {
+$('record-pace-group').addEventListener('change', () => {
+  recordGroup = $('record-pace-group').value;
+  for (const option of $('record-groups').querySelectorAll('button')) {
+    option.setAttribute('aria-pressed', String(option.dataset.recordGroup === recordGroup));
+  }
   if (recordResults) renderRecords(recordResults);
 });
 async function loadSaved() {

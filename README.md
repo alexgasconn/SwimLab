@@ -156,7 +156,8 @@ best effort per category, so overlapping windows cannot fill a podium.
 Each distance card also shows the number of valid, non-overlapping attempts in the
 current filtered view.
 The pace-by-distance chart uses the pace of the fastest-time effort in each
-category. Per-distance history charts compare each week's or month's best time
+category, with equally spaced labels for all target distances, and is found in
+Performance. Open a distance card's progress button to compare each week's or month's best time
 with the cumulative best through that period, using all qualifying sessions in
 the current filters, independently of the podium size. Weeks start on Monday;
 periods without efforts have no point. Open-water pace uses the actual distance

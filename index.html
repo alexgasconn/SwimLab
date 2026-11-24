@@ -65,6 +65,17 @@
     <section id="tab-performance" class="tab-panel" role="tabpanel" aria-labelledby="performance-tab" hidden>
       <div id="performance">
       <div class="section-heading"><div><p class="eyebrow">01 / PERFORMANCE</p><h2>The shape of your swimming</h2></div><span class="legend"><i class="teal"></i>Pool <i class="violet"></i>Open water</span></div>
+      <article class="panel">
+        <div class="panel-heading"><h3>Personal best pace by distance</h3>
+          <label>Category <select id="record-pace-group">
+            <option value="freestyle">Freestyle</option><option value="breaststroke">Breaststroke</option>
+            <option value="backstroke">Backstroke</option><option value="butterfly">Butterfly</option>
+            <option value="im">Individual medley</option><option value="open_water">Open water</option>
+          </select></label>
+        </div>
+        <p class="chart-note">Pace of the fastest-time effort at each target distance, not necessarily the fastest pace in open water. Lower is faster. Distances are equally spaced; labels without points have no qualifying effort.</p>
+        <div id="record-pace-chart" class="chart record-pace-chart"></div>
+      </article>
       <div class="chart-grid">
         <article class="panel"><div class="panel-heading"><h3>Pace vs distance</h3><span>SESSION SCATTER</span></div><p class="chart-note">Each dot is a session. Lower pace = faster swimming.</p><div id="scatter" class="chart"></div></article>
         <article class="panel">
@@ -115,18 +126,6 @@
         <button type="button" data-record-group="open_water" aria-pressed="false">Open water</button>
       </div>
       <p class="hint" id="record-method"></p>
-      <article class="panel">
-        <div class="panel-heading"><h3>Personal best pace by distance</h3><span>BEST TIME / DISTANCE</span></div>
-        <p class="chart-note">Pace of the fastest-time effort at each distance, not necessarily the fastest pace in open water. Lower is faster.</p>
-        <div id="record-pace-chart" class="chart"></div>
-      </article>
-      <div class="records-heading">
-        <div><p class="eyebrow">PERSONAL BEST HISTORY</p><h2>Progress by distance</h2></div>
-        <div class="record-controls"><label>Group by<select id="record-period"><option value="month">Month</option><option value="week">Week</option></select></label></div>
-      </div>
-      <p class="hint">Teal: best time in each period with a qualifying effort. Gold: best time so far within the current filters, at the end of each period. Weeks start on Monday. Empty periods have no point; the record carries forward.</p>
-      <div id="record-history" class="chart-grid"></div>
-      <div class="records-heading"><div><p class="eyebrow">TOP EFFORTS</p><h2>Your podium</h2></div></div>
       <div id="record-cards"></div>
     </section>
     <section id="tab-logbook" class="tab-panel" role="tabpanel" aria-labelledby="logbook-tab" hidden>

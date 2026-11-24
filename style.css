@@ -151,6 +151,13 @@ h3 { font-size: 14px; font-weight: 550; margin: 0; }
 .chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .chart { min-height: 180px; margin-top: 10px; }
 .chart svg { width: 100%; height: auto; display: block; }
+.record-pace-chart { overflow-x: auto; }
+.record-pace-chart svg { min-width: 640px; }
+.record-card.history-open { grid-column: 1 / -1; }
+.record-history-toggle { margin-top: 12px; }
+.record-history-controls { margin-top: 16px; }
+.record-history-controls label { display: inline-grid; gap: 5px; }
+.record-history-chart { max-width: 800px; }
 .chart-note { min-height: 38px; margin: 12px 0 0; font-size: 10px; }
 .grid-line { stroke: #2a3c48; stroke-dasharray: 3 5; stroke-width: .8; }
 .axis-text { fill: #8fa9ba; font-size: 10px; font-family: inherit; }
