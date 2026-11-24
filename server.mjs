@@ -101,6 +101,7 @@ export function createApp(fetcher = fetch, store = openStore()) {
         '/app.js': ['app.js', 'text/javascript'],
         '/charts.js': ['charts.js', 'text/javascript'],
         '/analytics.mjs': ['analytics.mjs', 'text/javascript'],
+        '/ai-export.mjs': ['ai-export.mjs', 'text/javascript'],
         '/activity.js': ['activity.js', 'text/javascript'],
         '/style.css': ['style.css', 'text/css'],
         '/land-10m.json': ['node_modules/world-atlas/land-10m.json', 'application/json'],

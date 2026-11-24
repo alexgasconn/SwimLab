@@ -3,7 +3,7 @@ import { mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
 await mkdir('public', { recursive: true });
 const html = await readFile('index.html', 'utf8');
 await writeFile('public/index.html', html.replace(/<html lang="[^"]+">/, '<html lang="es" data-storage="cloud">'));
-for (const file of ['app.js', 'activity.js', 'charts.js', 'analytics.mjs', 'style.css']) {
+for (const file of ['app.js', 'activity.js', 'charts.js', 'analytics.mjs', 'ai-export.mjs', 'style.css']) {
   await copyFile(file, `public/${file}`);
 }
 for (const [source, target] of [

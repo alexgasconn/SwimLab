@@ -96,6 +96,68 @@ export function metricChart(container, rows, options) {
   }
 }
 
+export function recordPaceChart(container, rows) {
+  const svg = chart(container, 'Pace of the fastest-time personal best at each distance. Lower is faster.', !rows.length);
+  if (!svg) return;
+  const distances = rows.map(row => row.distance);
+  const values = rows.map(row => row.entry.pace);
+  const xMin = Math.min(...distances), xMax = Math.max(...distances);
+  const min = Math.min(...values), max = Math.max(...values);
+  const xPadding = (xMax - xMin) * 0.04 || Math.max(10, xMin * 0.05);
+  const yPadding = (max - min) * 0.12 || Math.max(1, min * 0.05);
+  const { x, y } = axes(svg, Math.max(0, xMin - xPadding), xMax + xPadding, max + yPadding,
+    'Target distance (m)', 'Pace /100 m', number, paceLabel, Math.max(0, min - yPadding));
+  if (rows.length > 1) svg.append(element('polyline', {
+    points: rows.map(row => `${x(row.distance)},${y(row.entry.pace)}`).join(' '),
+    fill: 'none', stroke: colors.pool, 'stroke-width': 2,
+  }));
+  for (const { distance, entry } of rows) {
+    const dot = element('circle', { cx: x(distance), cy: y(entry.pace), r: 5, fill: colors.pool, class: 'data-point' });
+    tooltip(dot, `${distance} m · ${paceLabel(entry.pace)}/100 m · ${entry.date?.slice(0, 10)}${entry.distance ? ` · actual ${number(entry.distance)} m` : ''}`);
+    const link = element('a', { href: `#activity=${encodeURIComponent(entry.id)}`, 'aria-label': `Analyze ${entry.name}` });
+    link.append(dot);
+    svg.append(link);
+  }
+}
+
+export function recordHistoryChart(container, rows, label, period) {
+  const svg = chart(container, `${label}: best time per period and cumulative personal best within the current filters.`, !rows.length);
+  if (!svg) return;
+  const dates = rows.map(row => localDate(`${row.date}T00:00:00`).getTime());
+  const values = rows.flatMap(row => [row.entry.value, row.best.value]);
+  const min = Math.min(...values), max = Math.max(...values);
+  const padding = (max - min) * 0.12 || Math.max(1, min * 0.05);
+  const xPadding = dates.length === 1 ? 86400000 * 7 : 0;
+  const durationLabel = value => {
+    const seconds = Math.round(value);
+    return seconds >= 3600
+      ? `${Math.floor(seconds / 3600)}:${String(Math.floor(seconds % 3600 / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+      : paceLabel(seconds);
+  };
+  const { x, y } = axes(svg, dates[0] - xPadding, dates.at(-1) + xPadding, max + padding,
+    'Period start', 'Time', value => new Date(value).toLocaleDateString('en',
+      period === 'week' ? { day: 'numeric', month: 'short', year: '2-digit' } : { month: 'short', year: '2-digit' }),
+    durationLabel, Math.max(0, min - padding));
+  let step = '';
+  for (const [index, row] of rows.entries()) {
+    const px = x(dates[index]), py = y(row.best.value);
+    step += index ? `H${px} V${py} ` : `M${px},${py} `;
+  }
+  svg.append(element('path', { d: step, fill: 'none', stroke: colors.rolling, 'stroke-width': 2.5 }));
+  for (const [index, row] of rows.entries()) {
+    for (const [entry, color, kind, radius] of [
+      [row.best, colors.rolling, 'Best so far', 6],
+      [row.entry, colors.pool, 'Period best', 4],
+    ]) {
+      const dot = element('circle', { cx: x(dates[index]), cy: y(entry.value), r: radius, fill: color, class: 'data-point' });
+      tooltip(dot, `${row.date} · ${kind}: ${durationLabel(entry.value)} · ${entry.date?.slice(0, 10)}${entry.distance ? ` · actual ${number(entry.distance)} m` : ''}`);
+      const link = element('a', { href: `#activity=${encodeURIComponent(entry.id)}`, 'aria-label': `Analyze ${entry.name}: ${kind}` });
+      link.append(dot);
+      svg.append(link);
+    }
+  }
+}
+
 export function lengthRibbon(container, rows, origin) {
   const timed = rows.filter(r => Number.isFinite(r.start) && r.end != null);
   const svg = chart(container, 'Recorded length timeline: active lengths by stroke above, recorded rest below. Blank intervals have no length record.', !timed.length);

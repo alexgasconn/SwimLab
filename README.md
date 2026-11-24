@@ -30,6 +30,13 @@ with an unknown distance remain available for data-quality review.
   filter section above the dashboard. CSV export remains in the header.
   The global date and environment filters apply to the existing analytics; Oceanman
   uses all saved dates and swim types, while respecting the excluded-session toggle.
+- **AI context .md** downloads a Markdown prompt with the current global filter scope,
+  data coverage, environment and stroke summaries, weekly trends, personal bests
+  and their monthly history, Oceanman readiness, and every globally filtered logbook
+  session. The logbook's own filters and the podium size do not restrict this report;
+  Oceanman still uses full saved history. GPS coordinates and sensor time series are
+  omitted. Nothing is sent to an AI service: review the personal and health data
+  before choosing whether to share the downloaded file.
 - Moving pace vs distance scatterplot; pace and distance histograms.
 - Session SWOLF trend and pool / open-water summaries, including counts, session
   share, distance, pace, moving time, heart rate and available technique averages,
@@ -148,6 +155,12 @@ implausible length times cannot qualify. Each session contributes at most one
 best effort per category, so overlapping windows cannot fill a podium.
 Each distance card also shows the number of valid, non-overlapping attempts in the
 current filtered view.
+The pace-by-distance chart uses the pace of the fastest-time effort in each
+category. Per-distance history charts compare each week's or month's best time
+with the cumulative best through that period, using all qualifying sessions in
+the current filters, independently of the podium size. Weeks start on Monday;
+periods without efforts have no point. Open-water pace uses the actual distance
+of the fastest-time activity, which may not be the fastest-paced activity.
 Fastest session uses moving pace and a minimum 100 m session distance.
 Record cards highlight total effort time (including rests) and show pace per 100 m.
 Whole-session records and rankings highlight elapsed time and show moving pace

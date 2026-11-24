@@ -131,7 +131,7 @@ test('length trends require eight measured values and correlations require five 
   assert.equal(lengthCorrelation(rows.slice(0, 4), 'dps', 'pace').r, null);
   assert.equal(lengthCorrelation(rows.map(r => ({ ...r, dps: 2 })), 'dps', 'pace').r, null);
 });
-import { deriveMetrics, localDate, annotateOutliers, histogram, weeklyTrend, trainingHeatmap, personalBests, sessionRankings, swolfTrend, trainingSummary, strokeMix, sortSessions, filterLogbook, oceanmanPlan, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory } from './analytics.mjs';
+import { deriveMetrics, localDate, annotateOutliers, histogram, weeklyTrend, trainingHeatmap, personalBests, personalBestHistory, sessionRankings, swolfTrend, trainingSummary, strokeMix, sortSessions, filterLogbook, oceanmanPlan, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory } from './analytics.mjs';
 
 const activity = overrides => deriveMetrics({
   id: '1', name: 'Swim', date: '2026-10-12T08:30:00', type: 'pool', distance: 1000,
@@ -305,6 +305,25 @@ test('open-water records rank whole activities by moving time within inclusive 7
   assert.equal(records['3000m open water'][0].id, 'three');
   assert.equal(records['5000m open water'][0].id, 'five');
   assert.deepEqual(personalBests(rows, [], 3)['1000m open water'].map(row => row.id), ['lower', 'upper']);
+});
+
+test('personal best history uses every qualifying session, period minima and cumulative time', () => {
+  const rows = [
+    activity({ id: 'later', date: '2026-03-08T10:00:00', type: 'open_water', distance: 1000, movingTime: 90 }),
+    activity({ id: 'slower', date: '2026-01-05T10:00:00', type: 'open_water', distance: 1000, movingTime: 120 }),
+    activity({ id: 'first', date: '2026-01-01T10:00:00', type: 'open_water', distance: 1000, movingTime: 100 }),
+    activity({ id: 'mid', date: '2026-02-01T10:00:00', type: 'open_water', distance: 1000, movingTime: 110 }),
+  ];
+  const entries = personalBests(rows, [], Infinity)['1000m open water'];
+  assert.deepEqual(personalBestHistory(entries, 'month').map(row => [row.date, row.entry.id, row.best.id]), [
+    ['2026-01-01', 'first', 'first'], ['2026-02-01', 'mid', 'first'], ['2026-03-01', 'later', 'later'],
+  ]);
+  assert.deepEqual(personalBestHistory(entries, 'week').map(row => [row.date, row.entry.id, row.best.id]), [
+    ['2025-12-29', 'first', 'first'], ['2026-01-05', 'slower', 'first'],
+    ['2026-01-26', 'mid', 'first'], ['2026-03-02', 'later', 'later'],
+  ]);
+  assert.deepEqual(personalBestHistory([{ date: 'invalid', value: 10 }], 'month'), []);
+  assert.throws(() => personalBestHistory(entries, 'year'), /Invalid personal best history period/);
 });
 
 test('stroke-specific bests use exact windows and rankings respect selected metric and limit', () => {

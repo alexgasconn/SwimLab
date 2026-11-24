@@ -372,6 +372,24 @@ export function personalBests(activities, lengths, limit = 3) {
   return result;
 }
 
+export function personalBestHistory(entries, period) {
+  if (period !== 'week' && period !== 'month') throw new Error('Invalid personal best history period.');
+  const periods = new Map();
+  for (const entry of entries) {
+    const date = localDate(entry.date);
+    if (!Number.isFinite(date.getTime()) || !positive(entry.value)) continue;
+    const start = period === 'week' ? monday(date) : new Date(date.getFullYear(), date.getMonth(), 1);
+    const key = dateKey(start);
+    const previous = periods.get(key);
+    if (!previous || entry.value < previous.value) periods.set(key, entry);
+  }
+  let best = null;
+  return [...periods].sort(([a], [b]) => a.localeCompare(b)).map(([date, entry]) => {
+    if (!best || entry.value < best.value) best = entry;
+    return { date, entry, best };
+  });
+}
+
 export function swolfTrend(activities) {
   return activities.filter(a => a.swolf > 0 && !Number.isNaN(localDate(a.date).getTime()))
     .sort((a, b) => localDate(a.date) - localDate(b.date));

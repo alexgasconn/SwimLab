@@ -14,7 +14,7 @@
   <main>
     <header>
       <div><p class="eyebrow">GARMIN CONNECT / PERSONAL ANALYTICS</p><h1>Find your flow.</h1></div>
-      <div class="header-actions"><span class="badge" id="source">NO DATA</span><button id="export" class="secondary" disabled>Export CSV</button></div>
+      <div class="header-actions"><span class="badge" id="source">NO DATA</span><button id="export-ai" class="secondary" disabled title="Download a private Markdown context to review before sharing with an AI">AI context .md</button><button id="export" class="secondary" disabled>Export CSV</button></div>
     </header>
     <nav class="tabs" role="tablist" aria-label="Swim dashboard tabs">
       <button id="overview-tab" role="tab" aria-selected="true" aria-controls="tab-overview" tabindex="0">Overview</button>
@@ -115,6 +115,18 @@
         <button type="button" data-record-group="open_water" aria-pressed="false">Open water</button>
       </div>
       <p class="hint" id="record-method"></p>
+      <article class="panel">
+        <div class="panel-heading"><h3>Personal best pace by distance</h3><span>BEST TIME / DISTANCE</span></div>
+        <p class="chart-note">Pace of the fastest-time effort at each distance, not necessarily the fastest pace in open water. Lower is faster.</p>
+        <div id="record-pace-chart" class="chart"></div>
+      </article>
+      <div class="records-heading">
+        <div><p class="eyebrow">PERSONAL BEST HISTORY</p><h2>Progress by distance</h2></div>
+        <div class="record-controls"><label>Group by<select id="record-period"><option value="month">Month</option><option value="week">Week</option></select></label></div>
+      </div>
+      <p class="hint">Teal: best time in each period with a qualifying effort. Gold: best time so far within the current filters, at the end of each period. Weeks start on Monday. Empty periods have no point; the record carries forward.</p>
+      <div id="record-history" class="chart-grid"></div>
+      <div class="records-heading"><div><p class="eyebrow">TOP EFFORTS</p><h2>Your podium</h2></div></div>
       <div id="record-cards"></div>
     </section>
     <section id="tab-logbook" class="tab-panel" role="tabpanel" aria-labelledby="logbook-tab" hidden>

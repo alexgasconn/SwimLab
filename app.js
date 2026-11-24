@@ -1,6 +1,7 @@
-import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, weeklyMetrics, trainingHeatmap, personalBests, recordDistanceGroups, openWaterRecordDistances, trainingSummary, strokeMix, sortSessions, filterLogbook, hideShortSessions, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory } from './analytics.mjs';
-import { scatterplot, distribution, weeklyChart, heatmap, paceLabel, swolfChart, routeMap } from './charts.js';
+import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, weeklyMetrics, trainingHeatmap, personalBests, personalBestHistory, recordDistanceGroups, openWaterRecordDistances, trainingSummary, strokeMix, sortSessions, filterLogbook, hideShortSessions, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory } from './analytics.mjs';
+import { scatterplot, distribution, weeklyChart, heatmap, paceLabel, swolfChart, routeMap, recordPaceChart, recordHistoryChart } from './charts.js';
 import { renderActivity } from './activity.js';
+import { swimmerContext } from './ai-export.mjs';
 
 const $ = id => document.getElementById(id);
 const cloud = document.documentElement.dataset.storage === 'cloud';
@@ -12,6 +13,7 @@ let logbookRows = [];
 let currentPoll = null;
 let tableSort = null;
 let recordGroup = 'freestyle';
+let recordResults = null;
 let checkFilter = 'all';
 let trendPeriod = 'day';
 let readinessChecks = [];
@@ -127,13 +129,14 @@ function render() {
   renderSummary(trainingSummary(visible), annotated.filter(a => a.type === 'open_water').length);
   renderStrokeMix(strokeMix(visible, dataset.lengths));
   renderRoutes();
-  const limit = Number($('record-limit').value);
-  renderRecords(personalBests(visible, dataset.lengths, limit));
+  recordResults = personalBests(visible, dataset.lengths, Infinity);
+  renderRecords(recordResults);
   renderPoolOptions();
   applyLogbookFilters();
   renderQuality(dated);
   renderWarnings();
   renderOceanman(annotated.filter(a => include || !a.excluded));
+  $('export-ai').disabled = visible.length === 0;
 }
 function renderWeekly(scope, from, to) {
   const metric = $('weekly-metric').value;
@@ -501,6 +504,33 @@ function renderRecords(records) {
     : 'Pool efforts use exact-distance windows of recorded FIT lengths, including rests. One best effort per session. IM requires equal butterfly / backstroke / breaststroke / freestyle legs in that order. These are locally calculated efforts, not Garmin official records.';
   const groups = openWater ? [{ title: 'Open water', distances: openWaterRecordDistances.map(item => item.distance) }]
     : recordGroup === 'im' ? [{ title: 'Individual medley', distances: [100, 200, 400] }] : recordDistanceGroups;
+  const distances = groups.flatMap(group => group.distances);
+  const categoryKey = distance => `${distance}m ${openWater ? 'open water' : recordGroup === 'im' ? 'IM' : recordGroup}`;
+  recordPaceChart($('record-pace-chart'), distances.flatMap(distance => {
+    const entry = records[categoryKey(distance)][0];
+    return entry ? [{ distance, entry }] : [];
+  }));
+  const history = $('record-history');
+  history.replaceChildren();
+  for (const distance of distances) {
+    const rows = personalBestHistory(records[categoryKey(distance)], $('record-period').value);
+    if (!rows.length) continue;
+    const panel = document.createElement('article');
+    panel.className = 'panel';
+    const title = document.createElement('h3');
+    title.textContent = openWater ? openWaterRecordDistances.find(item => item.distance === distance).label : `${distance} m`;
+    const chart = document.createElement('div');
+    chart.className = 'chart';
+    panel.append(title, chart);
+    history.append(panel);
+    recordHistoryChart(chart, rows, `${title.textContent} ${openWater ? 'open water' : recordGroup === 'im' ? 'IM' : recordGroup}`, $('record-period').value);
+  }
+  if (!history.childElementCount) {
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = 'No qualifying efforts in this view.';
+    history.append(empty);
+  }
   for (const group of groups) {
     const section = document.createElement('section');
     section.className = 'record-distance-group';
@@ -510,8 +540,8 @@ function renderRecords(records) {
     grid.className = 'record-grid';
     section.append(title, grid);
     for (const distance of group.distances) {
-      const category = `${distance}m ${openWater ? 'open water' : recordGroup === 'im' ? 'IM' : recordGroup}`;
-      const entries = records[category];
+      const category = categoryKey(distance);
+      const entries = records[category].slice(0, Number($('record-limit').value));
       const card = document.createElement('article');
       card.className = 'record-card';
       const heading = document.createElement('h3');
@@ -716,7 +746,7 @@ function renderWarnings() {
   }
 }
 function safeRender() {
-  try { render(); } catch (error) { $('export').disabled = true; status(error.message, true); }
+  try { render(); } catch (error) { $('export').disabled = true; $('export-ai').disabled = true; status(error.message, true); }
 }
 const tabs = [...document.querySelectorAll('[role="tab"]')];
 function activateTab(tab, moveFocus = false) {
@@ -839,9 +869,12 @@ for (const button of $('record-groups').querySelectorAll('button')) {
     for (const option of $('record-groups').querySelectorAll('button')) {
       option.setAttribute('aria-pressed', String(option === button));
     }
-    renderRecords(personalBests(visible, dataset.lengths, Number($('record-limit').value)));
+    if (recordResults) renderRecords(recordResults);
   });
 }
+$('record-period').addEventListener('change', () => {
+  if (recordResults) renderRecords(recordResults);
+});
 async function loadSaved() {
   dataset = await fetchDataset();
   demo = false;
@@ -916,6 +949,30 @@ $('export').addEventListener('click', () => {
   link.download = `swimlab-${demo ? 'DEMO-' : ''}${dateKey(new Date())}.csv`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+$('export-ai').addEventListener('click', () => {
+  try {
+    const now = new Date();
+    const { from, to } = range();
+    const oceanmanActivities = annotateOutliers(dataset.activities).filter(a => $('outliers').checked || !a.excluded);
+    const content = swimmerContext({
+      activities: visible, lengths: dataset.lengths, records: recordResults,
+      columns: [...columns, ['FIT status', a => a.fitStatus ?? '--'],
+        ['Excluded', a => a.excluded ? 'yes' : 'no'], ['Review flags', a => a.reasons.join('; ') || '--']],
+      filters: { period: $('period').selectedOptions[0].textContent, from: from ? dateKey(from) : 'sin límite',
+        to: dateKey(to), environment: $('environment').selectedOptions[0].textContent, includeExcluded: $('outliers').checked },
+      coverage: $('coverage').textContent, demo, asOf: now,
+      readiness: oceanmanReadiness(oceanmanActivities, now, dataset.lengths),
+      rolling: oceanmanRollingVolumes(oceanmanActivities, now),
+    });
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `swimlab-context-${demo ? 'DEMO-' : ''}${dateKey(now)}.md`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    status('Markdown downloaded. Review personal and health data before sharing it with an AI.');
+  } catch (error) { status(`Cannot export AI context: ${error.message}`, true); }
 });
 $('demo').addEventListener('click', () => {
   demo = true;

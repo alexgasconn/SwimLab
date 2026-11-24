@@ -223,6 +223,8 @@ test('local server serves the offline map and its decoder without an external ti
     assert.match(decoder.contentType, /text\/javascript/);
     assert.match((await get('/world-atlas-license.txt')).text, /Permission to use/);
     assert.equal((await get('/activity.js')).status, 200);
+    assert.match((await get('/ai-export.mjs')).contentType, /text\/javascript/);
+    assert.equal((await get('/ai-export.mjs')).status, 200);
     assert.equal((await get('/api/data?id=invalid')).status, 400);
     assert.equal((await get('/api/data?id=999')).status, 404);
   } finally {
