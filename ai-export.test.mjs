@@ -6,7 +6,7 @@ import { swimmerContext } from './ai-export.mjs';
 test('AI context includes all filtered sessions, records and period history without leaking unrelated data', () => {
   const asOf = new Date('2026-03-15T12:00:00');
   const activities = [
-    { id: '1', name: 'Swim | <test>', date: '2026-01-05T12:00:00', type: 'open_water', distance: 1000, movingTime: 1200, elapsedTime: 1250 },
+    { id: '1', name: 'Swim | <test>', date: '2026-01-05T12:00:00', type: 'open_water', distance: 1000, movingTime: 1200, elapsedTime: 1250, strokes: 600 },
     { id: '2', name: 'Later', date: '2026-03-01T12:00:00', type: 'open_water', distance: 1000, movingTime: 1300, elapsedTime: 1350 },
   ].map(deriveMetrics);
   const records = personalBests(activities, [], Infinity);
@@ -24,6 +24,10 @@ test('AI context includes all filtered sessions, records and period history with
   assert.match(content, /Swim \\\| &lt;test&gt; \| 1000 \| --/);
   assert.match(content, /Later \| 1000 \| --/);
   assert.match(content, /## Tendencias semanales/);
+  assert.match(content, /Tempo medio s\/brazada/);
+  assert.match(content, /Tempo \(s\/stroke\)/);
+  assert.match(content, /tempo = 60 \/ SPM/);
+  assert.match(content, /Aguas abiertas \| 2 \| 2000 \| 1000 \| 2:05 \| 1250 \| -- \| 30 \| 2 \|/);
   assert.match(content, /## Oceanman 14K/);
   assert.match(content, /## Logbook completo \(2 sesiones\)/);
 });

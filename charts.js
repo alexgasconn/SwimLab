@@ -128,7 +128,7 @@ export function recordPaceChart(container, rows) {
 }
 
 export function recordHistoryChart(container, rows, label, period) {
-  const svg = chart(container, `${label}: best time per period and cumulative personal best within the current filters.`, !rows.length);
+  const svg = chart(container, `${label}: best time per period, cumulative personal best and a smoothed trend within the current filters.`, !rows.length);
   if (!svg) return;
   const dates = rows.map(row => localDate(`${row.date}T00:00:00`).getTime());
   const values = rows.flatMap(row => [row.entry.value, row.best.value]);
@@ -151,6 +151,23 @@ export function recordHistoryChart(container, rows, label, period) {
     step += index ? `H${px} V${py} ` : `M${px},${py} `;
   }
   svg.append(element('path', { d: step, fill: 'none', stroke: colors.rolling, 'stroke-width': 2.5 }));
+  if (rows.length >= 2) {
+    const points = rows.map((row, index) => {
+      const recent = rows.slice(Math.max(0, index - 2), index + 1);
+      return { x: x(dates[index]), y: y(recent.reduce((sum, item) => sum + item.entry.value, 0) / recent.length) };
+    });
+    let path = `M${points[0].x},${points[0].y} `;
+    for (let i = 1; i < points.length - 1; i++) {
+      const current = points[i], next = points[i + 1];
+      path += `Q${current.x},${current.y} ${(current.x + next.x) / 2},${(current.y + next.y) / 2} `;
+    }
+    const last = points.at(-1);
+    path += `Q${last.x},${last.y} ${last.x},${last.y}`;
+    const trend = element('path', { d: path, fill: 'none', class: 'record-history-trend',
+      'stroke-width': 2, 'stroke-dasharray': '6 5' });
+    trend.append(element('title', {}, 'Trend: mean of up to the last three periods with an effort'));
+    svg.append(trend);
+  }
   for (const [index, row] of rows.entries()) {
     for (const [entry, color, kind, radius] of [
       [row.best, colors.rolling, 'Best so far', 6],

@@ -2,6 +2,7 @@ import { activityAnalysis, lengthTrend, lengthCorrelation, positive } from './an
 import { metricChart, lengthRibbon, routeMap, paceLabel, strokeColors, strokeNames } from './charts.js';
 
 const format = value => Number.isFinite(value) ? new Intl.NumberFormat('en', { maximumFractionDigits: 1 }).format(value) : '--';
+const formatTempo = value => Number.isFinite(value) ? new Intl.NumberFormat('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value) : '--';
 const time = value => {
   if (!Number.isFinite(value)) return '--';
   const seconds = Math.round(value);
@@ -69,7 +70,7 @@ export function renderActivity(container, activity, dataset, recordData, { demo 
   title.append(heading, node('p', 'subtitle', `${activity.date?.replace('T', ' ')} · ${activity.type === 'pool' ? `${format(activity.poolLength)} m pool` : 'GPS swim'} · ID ${activity.id}`));
   hero.append(title, node('span', 'badge', `${format(activity.distance / 1000)} KM`));
   const coverage = node('p', 'hint detail-coverage',
-    `${details.active.length} usable active lengths / ${activity.lengths ?? '--'} reported · ${details.blocks.length} detected blocks · ${details.samples.length} timed records · ${details.hr.count} HR samples. Session totals and length metrics are kept separate.`);
+    `${details.active.length} usable active lengths / ${activity.lengths ?? '--'} reported · ${details.blocks.length} detected blocks · ${details.samples.length} timed records · ${details.hr.count} HR samples. Session totals and length metrics are kept separate. Tempo = 60 / SPM, using the recorded stroke-count convention without assumed doubling; it represents a same-arm cycle only if the device counts it that way.`);
   if (activity.review === 'exclude' || activity.excluded) coverage.append(node('strong', '', ' This activity is excluded or flagged in dashboard analytics; its raw detail is still shown.'));
   container.append(back, hero, coverage);
   if (recordData.error) container.append(node('p', 'detail-warning', `Sensor records could not be loaded: ${recordData.error} Reload this activity to retry.`));
@@ -142,7 +143,15 @@ function renderSummary(container, activity, details) {
     ['SPM', activity.spm, 'strokes/min'], ['LPM', activity.lpm, 'lengths/min'], ['TPL', activity.tpl, 's/length']]) {
     metrics.append(node('span', 'badge', `${name} ${format(value)} ${unit}`));
   }
-  if (activity.type === 'pool') container.append(metrics);
+  const tempo = node('span', 'badge', `Tempo ${formatTempo(activity.tempo)} s/stroke`);
+  if (activity.type === 'pool') {
+    metrics.append(tempo);
+    container.append(metrics);
+  } else {
+    const openWaterMetrics = node('div', 'detail-metric-chips');
+    openWaterMetrics.append(node('span', 'badge', `SPM ${format(activity.spm)} strokes/min`), tempo);
+    container.append(openWaterMetrics);
+  }
   if (!details.rows.length) {
     container.append(node('p', 'empty', activity.type === 'pool' ? 'No FIT lengths saved. Sync Garmin + FIT to enable length and stroke analysis.' : 'Open water has no pool lengths: stroke, SWOLF and set analysis are not applicable.'));
     return;
@@ -214,7 +223,7 @@ function renderLengths(container, details) {
     pace.append(node('strong', '', time(block.duration)), node('small', '', `${paceLabel(block.pace)} /100 m`));
     const m = block.metrics;
     label.append(elapsed, stroke, node('strong', '', `${format(block.distance)} m`), pace,
-      intervalMetrics([['DPS (m/stroke)', format(m.dps)], ['SPM', format(m.spm)], ['SWOLF', format(m.swolf)]]));
+      intervalMetrics([['DPS (m/stroke)', format(m.dps)], ['SPM', format(m.spm)], ['Tempo (s/stroke)', formatTempo(m.tempo)], ['SWOLF', format(m.swolf)]]));
     const extra = intervalMetrics([
       ['Strokes', format(m.strokes)], ['SPL', format(m.spl)], ['TPL (s)', format(m.tpl)],
       ['LPM', format(m.lpm)], ['Efficiency', format(m.efficiency)], ['Elapsed span', time(block.elapsed)],
@@ -225,7 +234,7 @@ function renderLengths(container, details) {
       const tile = node('span', 'length-tile', r.index);
       tile.tabIndex = 0;
       tile.style.setProperty('--stroke-color', strokeColors[r.stroke] ?? '#78879a');
-      tile.title = `Length ${r.index} · ${strokeName(r.stroke)}: ${format(r.distance)} m · ${time(r.duration)} · ${paceLabel(r.pace)}/100 m · ${format(r.strokes)} strokes`;
+      tile.title = `Length ${r.index} · ${strokeName(r.stroke)}: ${format(r.distance)} m · ${time(r.duration)} · ${paceLabel(r.pace)}/100 m · ${format(r.strokes)} strokes · tempo ${formatTempo(r.tempo)} s/stroke`;
       tile.setAttribute('aria-label', tile.title);
       ribbon.append(tile);
     }
@@ -242,11 +251,11 @@ function renderLengths(container, details) {
   metricChart(panel(grid, 'Stroke count per length', 'Recorded counts only. Missing stroke counts are not replaced with session averages.'), details.active, { yKey: 'spl', yLabel: 'Strokes / length' });
   container.append(grid);
   const data = panel(container, 'Length-level data', 'Duration and SWOLF use FIT elapsed length time. HR is the mean of recorded samples whose timestamps lie within the length, not a Garmin length summary.');
-  table(data, ['#', 'Stroke / state', 'Start +min', 'Distance m', 'Duration s', 'Timer s', 'Pace /100', 'Strokes', 'DPS m', 'SPM', 'LPM', 'SWOLF', 'HR bpm', 'HR n'],
+  table(data, ['#', 'Stroke / state', 'Start +min', 'Distance m', 'Duration s', 'Timer s', 'Pace /100', 'Strokes', 'DPS m', 'SPM', 'Tempo s/stroke', 'LPM', 'SWOLF', 'HR bpm', 'HR n'],
     details.rows.map(r => [r.index ?? 'Rest', r.active ? strokeName(r.stroke) : 'Recorded rest',
       format(Number.isFinite(r.start) && details.origin != null ? (r.start - details.origin) / 60 : null),
       r.active ? format(r.distance) : '0', format(r.duration), format(r.timerTime), paceLabel(r.pace),
-      r.active ? format(r.strokes) : '--', format(r.dps), format(r.spm), format(r.lpm), format(r.swolf), format(r.heartRate), r.hrSamples]));
+      r.active ? format(r.strokes) : '--', format(r.dps), format(r.spm), formatTempo(r.tempo), format(r.lpm), format(r.swolf), format(r.heartRate), r.hrSamples]));
 }
 
 function renderTechnique(container, details, activity) {
@@ -268,16 +277,16 @@ function renderTechnique(container, details, activity) {
     const rows = details.active.filter(r => r.stroke === select.value && r.distance === activity.poolLength);
     output.append(node('p', 'hint', `${rows.length} ${strokeName(select.value).toLowerCase()} lengths matching the ${format(activity.poolLength)} m pool. Length charts keep the original active-length index; gaps mark intervening lengths of other strokes.`));
     const trends = node('div', 'summary-grid detail-trends');
-    for (const [key, title, unit, formatter] of [['pace', 'Pace drift', '/100 m', paceLabel], ['dps', 'DPS drift', 'm/stroke', format], ['swolf', 'SWOLF drift', '', format]]) {
+    for (const [key, title, unit, formatter] of [['pace', 'Pace drift', '/100 m', paceLabel], ['dps', 'DPS drift', 'm/stroke', format], ['swolf', 'SWOLF drift', '', format], ['tempo', 'Tempo drift', 's/stroke', formatTempo]]) {
       const trend = lengthTrend(rows, key);
       card(trends, title, trend.change == null ? '--' : `${trend.change >= 0 ? '+' : ''}${format(trend.change)}%`,
-        trend.first == null ? `${trend.n} usable lengths; at least 8 required` : `First vs last quarter medians: ${formatter(trend.first)} → ${formatter(trend.last)} ${unit} (n=${trend.n}). ${key === 'dps' ? 'Higher DPS is more distance per stroke.' : 'Higher means slower pace / higher SWOLF.'}`);
+        trend.first == null ? `${trend.n} usable lengths; at least 8 required` : `First vs last quarter medians: ${formatter(trend.first)} → ${formatter(trend.last)} ${unit} (n=${trend.n}). ${key === 'dps' ? 'Higher DPS is more distance per stroke.' : key === 'tempo' ? 'Higher tempo means slower stroke frequency.' : 'Higher means slower pace / higher SWOLF.'}`);
     }
     output.append(trends);
     const grid = node('div', 'chart-grid');
     for (const [key, title, unit, formatter] of [['pace', 'Pace evolution', 'Pace /100 m', paceLabel], ['swolf', 'SWOLF evolution', 'SWOLF', format],
       ['dps', 'Distance per stroke', 'DPS (m/stroke)', format], ['spl', 'Strokes per length', 'SPL', format],
-      ['spm', 'Stroke frequency', 'SPM (strokes/min)', format], ['lpm', 'Length frequency', 'LPM (lengths/min)', format]]) {
+      ['spm', 'Stroke frequency', 'SPM (strokes/min)', format], ['tempo', 'Tempo evolution', 'Tempo (s/stroke)', formatTempo], ['lpm', 'Length frequency', 'LPM (lengths/min)', format]]) {
       metricChart(panel(grid, title), rows, { yKey: key, yLabel: unit, format: formatter, maxGap: 1, color: strokeColors[select.value] });
     }
     for (const [xKey, yKey, title, xLabel, yLabel, xFormat, yFormat] of [

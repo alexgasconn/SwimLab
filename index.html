@@ -84,7 +84,7 @@
               <option value="distance">Distance</option><option value="pace">Pace</option>
               <option value="dps">DPS</option><option value="spl">SPL</option>
               <option value="swolf">SWOLF</option><option value="tpl">TPL</option>
-              <option value="efficiency">Efficiency</option><option value="spm">SPM</option>
+              <option value="efficiency">Efficiency</option><option value="spm">SPM</option><option value="tempo">Tempo</option>
             </select></label>
           </div>
           <p class="chart-note"><i class="legend-line"></i>Trailing 4-week mean. Weeks start on Monday; the current week is incomplete.</p>
@@ -103,6 +103,9 @@
       <div class="section-heading"><div><p class="eyebrow">POOL / OPEN WATER</p><h2>Training by environment</h2></div></div>
       <p class="hint">Averages use available sessions; pace is weighted by distance. Pool-length metrics are not applicable to open water. Missing data is shown as --.</p>
       <div id="environment-summary" class="summary-grid"></div>
+      <div class="section-heading"><div><p class="eyebrow">FREESTYLE / BREASTSTROKE / BACKSTROKE / BUTTERFLY</p><h2>Metrics by stroke</h2></div></div>
+      <p class="hint">Uses only classified active FIT lengths from the current dashboard filters, separated by pool length. Distance, active time and pace use lengths with valid distance and duration; coverage is shown. Stroke-derived metrics require a recorded count on every timed length. Rates use totals, not averages of length rates; tempo = 60 / SPM, without assumed doubling. Rests and unrecorded gaps are excluded. HR and temperature are not recorded per style and are not borrowed from session averages. -- means unavailable.</p>
+      <div id="stroke-summary"></div>
       </div>
     </section>
     <section id="tab-routes" class="tab-panel" role="tabpanel" aria-labelledby="routes-tab" hidden>
@@ -130,7 +133,7 @@
     </section>
     <section id="tab-logbook" class="tab-panel" role="tabpanel" aria-labelledby="logbook-tab" hidden>
       <div class="section-heading"><div><p class="eyebrow">04 / SWIM LOGBOOK</p><h2>Every metric. One place.</h2></div><span id="table-count" class="badge">0 SESSIONS</span></div>
-      <p class="hint">Click a column heading to sort. SPM = strokes / moving minutes. SPL = strokes / active lengths. DPS = metres / stroke. TPL = moving seconds / length. LPM = active lengths / moving minutes. Stroke percentages use all recorded active-length distance, including unclassified lengths. Missing metrics are shown as --, never zero-filled.</p>
+      <p class="hint">Click a column heading to sort. SPM = strokes / moving minutes; tempo = 60 / SPM in seconds per recorded stroke. Garmin's stroke-count convention is retained, with no assumed doubling; tempo is a same-arm cycle only if the device counts it that way. SPL = strokes / active lengths. DPS = metres / stroke. TPL = moving seconds / length. LPM = active lengths / moving minutes. Stroke percentages use all recorded active-length distance, including unclassified lengths. Missing metrics are shown as --, never zero-filled.</p>
       <div class="logbook-filters panel" aria-label="Logbook filters">
         <label>Minimum distance (m)<input id="distance-min" type="number" min="0" step="any" placeholder="No minimum"></label>
         <label>Maximum distance (m)<input id="distance-max" type="number" min="0" step="any" placeholder="No maximum"></label>
@@ -139,6 +142,16 @@
       </div>
       <p id="logbook-filter-error" class="filter-error" role="status" aria-live="polite"></p>
       <p class="hint">These filters affect the logbook and CSV export, not the dashboard charts.</p>
+      <div class="panel logbook-display">
+        <fieldset id="logbook-groups"><legend>Column groups</legend></fieldset>
+        <label class="logbook-color-toggle"><input id="logbook-colors" type="checkbox" aria-describedby="logbook-color-help"> Conditional colors</label>
+        <p class="hint">Date stays visible: click it to open the activity. Display options do not change CSV or AI exports. Options remain active until you reload this page.</p>
+        <p id="logbook-color-help" class="hint">Green = favorable, yellow = middle, red = unfavorable for the selected target, relative to each column's filtered minimum and maximum (three equal ranges). This is not an absolute performance or health grade. Compare similar styles, pool lengths and workouts. Missing or identical values stay uncolored.</p>
+        <details><summary>Color targets by metric</summary>
+          <p class="hint">Defaults favor more distance, moving ratio, DPS, LPM and SPM, and less pace time, SPL, TPL, tempo and SWOLF. Average temperature favors lower values, as selected; stroke percentages favor more presence, not better technique. Counts and heart rate have no default target. SPM, tempo and temperature have no universal ideal: adjust these targets to your workout. These are configurable comparisons, not training or health prescriptions.</p>
+          <div id="logbook-color-targets"></div>
+        </details>
+      </div>
       <div class="panel table-panel"><div class="table-wrap" tabindex="0" aria-label="Scrollable swim metrics"><table><thead id="table-head"></thead><tbody id="sessions"></tbody></table></div></div>
       <details class="panel review-panel"><summary>Data quality &amp; exclusions <span id="quality-count"></span></summary><p class="hint">Conservative physical limits and robust pace deviations flag sessions, not delete them. Unusual does not mean wrong: technique drills and long rests may be legitimate. Include / exclude decisions are saved locally. Invalid FIT lengths never qualify for records.</p><div id="quality"></div></details>
       <details class="panel review-panel"><summary>Import coverage &amp; warnings <span id="import-count"></span></summary><div id="import-warnings" class="hint"></div></details>

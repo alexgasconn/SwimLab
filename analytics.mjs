@@ -1,15 +1,30 @@
 export const positive = value => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 export const nonnegative = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 export const divide = (a, b) => a != null && b > 0 ? a / b : null;
+export const strokeTempo = spm => {
+  const rate = positive(spm);
+  const tempo = rate == null ? null : 60 / rate;
+  return positive(tempo);
+};
+export function metricRating(value, min, max, direction) {
+  if (![value, min, max].every(Number.isFinite) || max <= min || !['higher', 'lower'].includes(direction)) return null;
+  // Ignore floating-point noise in otherwise identical columns.
+  if (max - min <= Number.EPSILON * Math.max(1, Math.abs(min), Math.abs(max)) * 8) return null;
+  const position = (value - min) / (max - min);
+  const score = direction === 'higher' ? position : 1 - position;
+  return score >= 2 / 3 ? 'good' : score <= 1 / 3 ? 'poor' : 'medium';
+}
 export const localDate = value => new Date(typeof value === 'string' ? value.replace(' ', 'T') : NaN);
 export const dateKey = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 export function deriveMetrics(activity) {
+  const spm = divide(activity.strokes == null ? null : activity.strokes * 60, activity.movingTime);
   return {
     ...activity,
     pace: divide(activity.movingTime == null ? null : activity.movingTime * 100, activity.distance),
     movingRatio: divide(activity.movingTime, activity.elapsedTime),
-    spm: divide(activity.strokes == null ? null : activity.strokes * 60, activity.movingTime),
+    spm,
+    tempo: strokeTempo(spm),
     spl: divide(activity.strokes, activity.lengths),
     dps: divide(activity.distance, activity.strokes),
     tpl: divide(activity.movingTime, activity.lengths),
@@ -23,6 +38,28 @@ const median = values => {
   return n ? (sorted[Math.floor((n - 1) / 2)] + sorted[Math.floor(n / 2)]) / 2 : null;
 };
 
+function summarizeLengths(rows) {
+  const count = rows.length;
+  const total = (key, valid) => count && rows.every(row => valid(row[key]) != null)
+    ? rows.reduce((sum, row) => sum + row[key], 0) : null;
+  const distance = total('distance', positive);
+  const duration = total('duration', positive);
+  const strokes = total('strokes', nonnegative);
+  const timerTime = total('timerTime', nonnegative);
+  const hrSamples = rows.reduce((sum, row) => sum + (row.hrSamples ?? 0), 0);
+  const dps = divide(distance, strokes);
+  const spm = divide(strokes == null ? null : strokes * 60, duration);
+  return { distance, duration, metrics: {
+    strokes, timerTime, dps, spl: divide(strokes, count),
+    spm, tempo: strokeTempo(spm),
+    swolf: strokes == null || duration == null ? null : (duration + strokes) / count,
+    tpl: divide(duration, count), lpm: divide(count * 60, duration),
+    efficiency: dps == null || duration == null ? null : distance / duration * dps,
+    heartRate: divide(rows.reduce((sum, row) => sum + (row.heartRate ?? 0) * (row.hrSamples ?? 0), 0), hrSamples),
+    hrSamples,
+  } };
+}
+
 export function activityAnalysis(activity, lengths = [], records = []) {
   const samples = records.filter(r => Number.isFinite(r.timestamp)).sort((a, b) => a.timestamp - b.timestamp);
   let activeIndex = 0;
@@ -30,13 +67,14 @@ export function activityAnalysis(activity, lengths = [], records = []) {
     const duration = positive(l.duration);
     const distance = l.active ? positive(l.distance) : null;
     const strokes = l.active ? nonnegative(l.strokes) : null;
+    const spm = duration && strokes != null ? strokes * 60 / duration : null;
     const end = Number.isFinite(l.start) && duration ? l.start + duration : null;
     const hr = end == null ? [] : samples.filter(r => r.timestamp >= l.start && r.timestamp < end && positive(r.heartRate));
     return { ...l, index: l.active ? ++activeIndex : null, end,
       pace: duration && distance ? duration * 100 / distance : null,
       swolf: duration && strokes != null ? duration + strokes : null,
       dps: distance && strokes > 0 ? distance / strokes : null, spl: strokes,
-      spm: duration && strokes != null ? strokes * 60 / duration : null,
+      spm, tempo: strokeTempo(spm),
       lpm: duration && distance ? 60 / duration : null,
       heartRate: hr.length ? hr.reduce((sum, r) => sum + r.heartRate, 0) / hr.length : null, hrSamples: hr.length };
   });
@@ -53,27 +91,11 @@ export function activityAnalysis(activity, lengths = [], records = []) {
     block.rows.push(row);
   }
   for (const b of blocks) {
-    b.distance = b.rows.every(r => positive(r.distance)) ? b.rows.reduce((sum, r) => sum + r.distance, 0) : null;
-    b.duration = b.rows.every(r => positive(r.duration)) ? b.rows.reduce((sum, r) => sum + r.duration, 0) : null;
+    Object.assign(b, summarizeLengths(b.rows));
     b.pace = divide(b.duration == null ? null : b.duration * 100, b.distance);
     b.start = b.rows[0].start;
     b.end = b.rows.at(-1).end;
     b.elapsed = Number.isFinite(b.start) && b.end != null && b.end >= b.start ? b.end - b.start : null;
-    const count = b.rows.length;
-    const strokes = b.rows.every(r => r.spl != null) ? b.rows.reduce((sum, r) => sum + r.spl, 0) : null;
-    const timerTime = b.rows.every(r => nonnegative(r.timerTime) != null)
-      ? b.rows.reduce((sum, r) => sum + r.timerTime, 0) : null;
-    const hrSamples = b.rows.reduce((sum, r) => sum + r.hrSamples, 0);
-    const dps = divide(b.distance, strokes);
-    b.metrics = {
-      strokes, timerTime, dps, spl: divide(strokes, count),
-      spm: divide(strokes == null ? null : strokes * 60, b.duration),
-      swolf: strokes == null || b.duration == null ? null : (b.duration + strokes) / count,
-      tpl: divide(b.duration, count), lpm: divide(count * 60, b.duration),
-      efficiency: dps == null || b.duration == null ? null : b.distance / b.duration * dps,
-      heartRate: divide(b.rows.reduce((sum, r) => sum + r.heartRate * r.hrSamples, 0), hrSamples),
-      hrSamples,
-    };
   }
   const timed = rows.filter(r => Number.isFinite(r.start) && r.end != null);
   const starts = [...timed.map(r => r.start), ...samples.map(r => r.timestamp)];
@@ -189,6 +211,7 @@ export const weeklyMetrics = {
   tpl: { label: 'TPL (s/length)', value: a => positive(a.tpl) },
   efficiency: { label: 'Efficiency (swim index)', value: a => positive(a.pace) && positive(a.dps) ? 100 / a.pace * a.dps : null },
   spm: { label: 'SPM (strokes/min)', value: a => positive(a.spm) },
+  tempo: { label: 'Tempo (s/stroke)', value: a => positive(a.tempo) },
 };
 
 export function weeklyTrend(activities, now = new Date(), metric = 'distance') {
@@ -198,7 +221,7 @@ export function weeklyTrend(activities, now = new Date(), metric = 'distance') {
   const definition = weeklyMetrics[metric];
   const totals = new Map();
   for (const a of valid) {
-    if (!isDistance && metric !== 'pace' && a.type !== 'pool') continue;
+    if (!isDistance && metric !== 'pace' && metric !== 'tempo' && a.type !== 'pool') continue;
     const value = definition.value(a);
     if (value == null) continue;
     const key = dateKey(monday(localDate(a.date)));
@@ -251,6 +274,30 @@ export function strokeMix(activities, lengths) {
       stroke, distance, percentage: total ? distance / total * 100 : null,
     })),
   };
+}
+
+export function strokeSummary(activities, lengths) {
+  const pools = new Map(activities.filter(activity => activity.type === 'pool')
+    .map(activity => [activity.id, positive(activity.poolLength)]));
+  const groups = new Map();
+  for (const row of lengths) {
+    if (!pools.has(row.activityId) || !row.active || !strokeOrder.includes(row.stroke)) continue;
+    const poolLength = pools.get(row.activityId);
+    if (!groups.has(poolLength)) groups.set(poolLength, []);
+    groups.get(poolLength).push(row);
+  }
+  return [...groups].sort(([a], [b]) => (a ?? Infinity) - (b ?? Infinity)).map(([poolLength, rows]) => ({
+    poolLength,
+    strokes: ['freestyle', 'breaststroke', 'backstroke', 'butterfly'].map(stroke => {
+      const recorded = rows.filter(row => row.stroke === stroke);
+      const measured = recorded.filter(row => positive(row.distance) && positive(row.duration));
+      const summary = summarizeLengths(measured);
+      return { stroke, sessions: new Set(recorded.map(row => row.activityId)).size,
+        lengths: recorded.length, measuredLengths: measured.length,
+        countedLengths: measured.filter(row => nonnegative(row.strokes) != null).length,
+        ...summary, pace: divide(summary.duration == null ? null : summary.duration * 100, summary.distance) };
+    }),
+  }));
 }
 
 export function sortSessions(activities, getValue, direction = 'ascending') {
@@ -319,8 +366,17 @@ export function personalBests(activities, lengths, limit = 3) {
         if (activity.distance < distance * 0.93 || activity.distance > distance * 1.07) continue;
         const key = openWaterKey(distance);
         attempts[key]++;
+        const measured = deriveMetrics(activity);
         result[key].push({ ...entry, distance: activity.distance, value: activity.movingTime,
-          duration: activity.movingTime, pace: activity.movingTime * 100 / activity.distance });
+          duration: activity.movingTime, pace: activity.movingTime * 100 / activity.distance,
+          metrics: { distance: activity.distance, activeTime: activity.movingTime,
+            elapsedTime: positive(activity.elapsedTime), timerTime: nonnegative(activity.timerTime),
+            movingRatio: measured.movingRatio, lengths: null, strokes: nonnegative(activity.strokes),
+            spm: measured.spm, tempo: measured.tempo, dps: measured.dps,
+            spl: null, tpl: null, lpm: null, swolf: null,
+            activePace: measured.pace, efficiency: measured.dps == null ? null : activity.distance / activity.movingTime * measured.dps,
+            heartRate: positive(activity.heartRate), temperature: activity.temperature },
+        });
       }
     }
     if (activity.type !== 'pool') continue;
@@ -359,9 +415,21 @@ export function personalBests(activities, lengths, limit = 3) {
         attempts[category.key]++;
         previousEnd = effort.end;
       }
-      const best = efforts.reduce((minimum, effort) => Math.min(minimum, effort.time), Infinity);
+      const best = efforts.reduce((minimum, effort) => minimum == null || effort.time < minimum.time ? effort : minimum, null);
       // One best effort per session avoids filling the podium with overlapping windows.
-      if (Number.isFinite(best)) result[category.key].push({ ...entry, value: best, duration: best, pace: best * 100 / category.distance });
+      if (best) {
+        const rows = active.slice(best.start, best.end + 1);
+        const summary = summarizeLengths(rows);
+        result[category.key].push({ ...entry, value: best.time, duration: best.time,
+          distance: summary.distance, pace: best.time * 100 / category.distance,
+          metrics: { ...summary.metrics, distance: summary.distance, activeTime: summary.duration,
+            elapsedTime: best.time, movingRatio: divide(summary.duration, best.time),
+            activePace: divide(summary.duration == null ? null : summary.duration * 100, summary.distance),
+            poolLength: positive(activity.poolLength), lengths: rows.length,
+            firstLength: best.start + 1, lastLength: best.end + 1,
+            startSequence: rows[0].sequence, endSequence: rows.at(-1).sequence },
+        });
+      }
     }
   }
   for (const [key, entries] of Object.entries(result)) {
@@ -418,6 +486,7 @@ export function trainingSummary(activities) {
       averageMovingTime: average(a => a.movingTime),
       averageHeartRate: average(a => a.heartRate),
       averageSpm: average(a => a.spm),
+      averageTempo: average(a => a.tempo),
       averageDps: average(a => a.dps),
       averageSpl: average(a => a.spl),
       averageTpl: average(a => a.tpl),

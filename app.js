@@ -1,4 +1,4 @@
-import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, weeklyMetrics, trainingHeatmap, personalBests, personalBestHistory, recordDistanceGroups, openWaterRecordDistances, trainingSummary, strokeMix, sortSessions, filterLogbook, hideShortSessions, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory } from './analytics.mjs';
+import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, weeklyMetrics, trainingHeatmap, personalBests, personalBestHistory, recordDistanceGroups, openWaterRecordDistances, trainingSummary, strokeMix, strokeSummary, sortSessions, filterLogbook, hideShortSessions, metricRating, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory } from './analytics.mjs';
 import { scatterplot, distribution, weeklyChart, heatmap, paceLabel, swolfChart, routeMap, recordPaceChart, recordHistoryChart } from './charts.js';
 import { renderActivity } from './activity.js';
 import { swimmerContext } from './ai-export.mjs';
@@ -38,10 +38,10 @@ const columns = [
   ['Moving %', a => percent(a.movingRatio == null ? null : a.movingRatio * 100)],
   ['Pace /100 m', a => paceLabel(a.pace)], ['HR avg', a => format(a.heartRate, 0)],
   ['Lengths', a => format(a.lengths, 0)], ['Strokes', a => format(a.strokes, 0)],
-  ['SPM', a => format(a.spm)], ['SPL', a => format(a.spl)],
+  ['SPM', a => format(a.spm)], ['Tempo (s/stroke)', a => format(a.tempo, 2)], ['SPL', a => format(a.spl)],
   ['DPS (m)', a => format(a.dps, 3)], ['TPL (s)', a => format(a.tpl, 2)],
   ['LPM', a => format(a.lpm, 2)], ['SWOLF', a => format(a.swolf)],
-  ['Temp (C)', a => format(a.temperature)], ['Min temp (C)', a => format(a.minTemperature)],
+  ['Avg temp (C)', a => format(a.temperature)], ['Min temp (C)', a => format(a.minTemperature)],
   ['Max temp (C)', a => format(a.maxTemperature)],
   ['Free %', a => percent(a.freestylePct)], ['Breast %', a => percent(a.breaststrokePct)],
   ['Back %', a => percent(a.backstrokePct)], ['Fly %', a => percent(a.butterflyPct)],
@@ -50,9 +50,31 @@ const sortFields = [
   a => a.id, a => localDate(a.date).getTime(), a => a.name, a => (localDate(a.date).getDay() + 6) % 7,
   a => a.type, a => a.poolLength, a => a.distance, a => a.movingTime, a => a.elapsedTime, a => a.timerTime,
   a => a.movingRatio, a => a.pace, a => a.heartRate, a => a.lengths, a => a.strokes,
-  a => a.spm, a => a.spl, a => a.dps, a => a.tpl, a => a.lpm, a => a.swolf,
+  a => a.spm, a => a.tempo, a => a.spl, a => a.dps, a => a.tpl, a => a.lpm, a => a.swolf,
   a => a.temperature, a => a.minTemperature, a => a.maxTemperature,
   a => a.freestylePct, a => a.breaststrokePct, a => a.backstrokePct, a => a.butterflyPct,
+];
+const logbookGroups = [
+  { name: 'Session', shown: true, titles: ['Environment', 'Pool (m)', 'Distance (m)', 'Pace /100 m'] },
+  { name: 'Times', shown: true, titles: ['Moving', 'Elapsed', 'Timer', 'Moving %'] },
+  { name: 'Stroke', shown: true, titles: ['Lengths', 'Strokes', 'SPM', 'Tempo (s/stroke)', 'SPL', 'DPS (m)', 'TPL (s)', 'LPM', 'SWOLF'] },
+  { name: 'Sensors', shown: false, titles: ['HR avg', 'Avg temp (C)'] },
+  { name: 'Stroke mix', shown: false, titles: ['Free %', 'Breast %', 'Back %', 'Fly %'] },
+];
+const metricDirections = new Map([
+  ['Distance (m)', 'higher'], ['Moving %', 'higher'], ['Pace /100 m', 'lower'],
+  ['HR avg', 'none'], ['Lengths', 'none'], ['Strokes', 'none'], ['SPM', 'higher'],
+  ['Tempo (s/stroke)', 'lower'], ['SPL', 'lower'], ['DPS (m)', 'higher'],
+  ['TPL (s)', 'lower'], ['LPM', 'higher'], ['SWOLF', 'lower'],
+  ['Avg temp (C)', 'lower'],
+  ['Free %', 'higher'], ['Breast %', 'higher'], ['Back %', 'higher'], ['Fly %', 'higher'],
+]);
+const techniqueMetrics = [
+  ['Strokes', m => format(m.strokes, 0)], ['SPM', m => format(m.spm, 2)],
+  ['Tempo (s/stroke)', m => format(m.tempo, 2)], ['SPL', m => format(m.spl, 2)],
+  ['DPS (m/stroke)', m => format(m.dps, 3)], ['TPL (s/length)', m => format(m.tpl, 2)],
+  ['LPM', m => format(m.lpm, 2)], ['SWOLF', m => format(m.swolf, 2)],
+  ['Swim index', m => format(m.efficiency, 2)],
 ];
 const strokeLabels = { freestyle: 'Freestyle', breaststroke: 'Breaststroke', backstroke: 'Backstroke', butterfly: 'Butterfly' };
 function status(message, error = false) {
@@ -127,6 +149,7 @@ function render() {
   heatmap($('heatmap'), trainingHeatmap(visible));
   swolfChart($('swolf-chart'), visible);
   renderSummary(trainingSummary(visible), annotated.filter(a => a.type === 'open_water').length);
+  renderStrokeSummary(strokeSummary(visible, dataset.lengths));
   renderStrokeMix(strokeMix(visible, dataset.lengths));
   renderRoutes();
   recordResults = personalBests(visible, dataset.lengths, Infinity);
@@ -147,8 +170,8 @@ function renderWeekly(scope, from, to) {
   const weeks = weeklyTrend(scope, new Date(), metric)
     .filter(w => (!first || w.date >= first) && w.date <= dateKey(to));
   $('weekly-method').textContent = distance ? 'Weekly total; weeks without swims count as zero.'
-    : `${metric === 'pace' ? 'Pool and open-water' : 'Pool-only'} session averages; weeks without measurements are skipped.${metric === 'efficiency' ? ' Swim index = moving speed (m/s) × distance per stroke (m/stroke).' : ''}`;
-  weeklyChart($('weekly'), weeks, weeklyMetrics[metric].label, { distance, format: metric === 'pace' ? paceLabel : undefined });
+    : `${metric === 'pace' || metric === 'tempo' ? 'Pool and open-water' : 'Pool-only'} session averages; weeks without measurements are skipped.${metric === 'efficiency' ? ' Swim index = moving speed (m/s) × distance per stroke (m/stroke).' : metric === 'tempo' ? ' Tempo = 60 / SPM, using the recorded stroke-count convention.' : ''}`;
+  weeklyChart($('weekly'), weeks, weeklyMetrics[metric].label, { distance, format: metric === 'pace' ? paceLabel : metric === 'tempo' ? value => format(value, 2) : undefined });
 }
 $('weekly-metric').addEventListener('change', safeRender);
 
@@ -215,6 +238,7 @@ function renderSummary(summary, savedOpenWater) {
       ['Avg moving time', time(cardData.averageMovingTime)],
       ['Avg HR', `${format(cardData.averageHeartRate, 0)} bpm`],
       ['Avg SPM', format(cardData.averageSpm, 1)],
+      ['Avg tempo', `${format(cardData.averageTempo, 2)} s/stroke`],
       ['Avg DPS', `${format(cardData.averageDps, 2)} m/stroke`],
       ['Avg efficiency', format(cardData.averageEfficiency, 2)],
     ];
@@ -245,6 +269,101 @@ function renderSummary(summary, savedOpenWater) {
   }
   if (!cards.length) container.textContent = 'No sessions match these filters.';
 }
+
+function renderStrokeSummary(groups) {
+  const container = $('stroke-summary');
+  container.replaceChildren();
+  for (const group of groups) {
+    const panel = document.createElement('article');
+    panel.className = 'panel stroke-summary-panel';
+    const heading = document.createElement('h3');
+    heading.textContent = group.poolLength == null ? 'Pool length unknown' : `${format(group.poolLength, 2)} m pool`;
+    const wrap = document.createElement('div');
+    wrap.className = 'table-wrap';
+    wrap.tabIndex = 0;
+    wrap.setAttribute('aria-label', `${heading.textContent}: metrics by stroke`);
+    const table = document.createElement('table');
+    const head = document.createElement('thead'), header = document.createElement('tr'), body = document.createElement('tbody');
+    const definitions = [
+      ['Stroke', row => strokeLabels[row.stroke]], ['Sessions', row => row.sessions],
+      ['Timed / recorded lengths', row => `${row.measuredLengths} / ${row.lengths}`],
+      ['Counted / timed lengths', row => `${row.countedLengths} / ${row.measuredLengths}`],
+      ['Distance (m)', row => format(row.distance, 2)], ['Active time', row => time(row.duration)],
+      ['FIT timer', row => time(row.metrics.timerTime)], ['Pace /100 m', row => paceLabel(row.pace)],
+      ...techniqueMetrics.map(([label, get]) => [label, row => get(row.metrics)]),
+    ];
+    for (const [label] of definitions) {
+      const th = document.createElement('th');
+      th.scope = 'col';
+      th.textContent = label;
+      header.append(th);
+    }
+    for (const row of group.strokes) {
+      const tr = document.createElement('tr');
+      for (const [, get] of definitions) {
+        const cell = document.createElement('td');
+        cell.textContent = get(row);
+        tr.append(cell);
+      }
+      body.append(tr);
+    }
+    head.append(header);
+    table.append(head, body);
+    wrap.append(table);
+    panel.append(heading, wrap);
+    container.append(panel);
+  }
+  if (!groups.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = 'No classified active FIT lengths in the current filters. Sync Garmin + FIT to enable metrics by stroke.';
+    container.append(empty);
+  }
+}
+
+function recordAdvancedStats(entry, category, openWater) {
+  const disclosure = document.createElement('details');
+  disclosure.className = 'record-advanced';
+  const toggle = document.createElement('summary');
+  toggle.textContent = 'Show advanced stats';
+  toggle.setAttribute('aria-label', `Show advanced stats for ${category} on ${entry.date?.slice(0, 10)}`);
+  disclosure.addEventListener('toggle', () => {
+    const action = disclosure.open ? 'Hide' : 'Show';
+    toggle.textContent = `${action} advanced stats`;
+    toggle.setAttribute('aria-label', `${action} advanced stats for ${category} on ${entry.date?.slice(0, 10)}`);
+  });
+  const m = entry.metrics;
+  const note = document.createElement('p');
+  note.className = 'hint';
+  note.textContent = openWater
+    ? 'Metrics of this whole open-water activity, using actual distance and moving time. Pool-length metrics do not apply.'
+    : `Exact effort: active lengths ${m.firstLength}-${m.lastLength} of the activity. Effort time and pace include intervening rests/gaps; active time, tempo and technique use only these lengths, not session averages. HR and temperature are unavailable at this effort level.`;
+  const values = [
+    ['Distance', `${format(m.distance, 2)} m`],
+    [openWater ? 'Moving time' : 'Active length time', time(m.activeTime)],
+    [openWater ? 'Session elapsed' : 'Effort elapsed', time(m.elapsedTime)],
+    ['FIT timer', time(m.timerTime)],
+    [openWater ? 'Moving ratio' : 'Active / effort', percent(m.movingRatio == null ? null : m.movingRatio * 100)],
+    ['Record pace', `${paceLabel(entry.pace)} /100 m`],
+    ['Active pace', `${paceLabel(m.activePace)} /100 m`],
+    ...(!openWater ? [['Pool length', `${format(m.poolLength, 2)} m`], ['Lengths', format(m.lengths, 0)]] : []),
+    ...techniqueMetrics.map(([label, get]) => [label, get(m)]),
+    ['HR avg', `${format(m.heartRate, 0)} bpm`], ['Avg temp', `${format(m.temperature, 1)} C`],
+  ];
+  const stats = document.createElement('dl');
+  stats.className = 'environment-metrics record-advanced-metrics';
+  for (const [label, value] of values) {
+    const item = document.createElement('div');
+    const term = document.createElement('dt'), definition = document.createElement('dd');
+    term.textContent = label;
+    definition.textContent = value;
+    item.append(term, definition);
+    stats.append(item);
+  }
+  disclosure.append(toggle, note, stats);
+  return disclosure;
+}
+
 function renderOceanman(activities) {
   const now = new Date();
   const readiness = oceanmanReadiness(activities, now, dataset.lengths);
@@ -551,6 +670,7 @@ function renderRecords(records) {
         stats.textContent = `${openWater ? `${format(entry.distance, 2)} m · ` : ''}${paceLabel(entry.pace)} /100 m`;
         details.append(stats);
         row.append(rank, details, podiumTime(entry.duration, openWater ? 'Moving time' : 'Effort time'));
+        row.append(recordAdvancedStats(entry, category, openWater));
         card.append(row);
       });
       const toggle = document.createElement('button');
@@ -579,7 +699,7 @@ function renderRecords(records) {
       controls.append(label);
       const note = document.createElement('p');
       note.className = 'hint';
-      note.textContent = 'Teal: best time in each period with an effort. Gold: best time so far within the current filters. Weeks start on Monday; empty periods have no point.';
+      note.textContent = 'Teal: best time in each period with an effort. Gold: best time so far. Dashed violet: smoothed mean of up to the last three periods with an effort (at least two periods needed). All use the current filters; gaps are connected, not zero-filled. Weeks start on Monday.';
       const chart = document.createElement('div');
       chart.className = 'chart record-history-chart';
       const renderHistory = () => recordHistoryChart(chart, personalBestHistory(records[category], select.value), category, select.value);
@@ -599,22 +719,71 @@ function renderRecords(records) {
     $('record-cards').append(section);
   }
 }
+function setupLogbookDisplay() {
+  const groups = $('logbook-groups');
+  for (const group of logbookGroups) {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = group.shown;
+    input.addEventListener('change', () => {
+      group.shown = input.checked;
+      if (tableSort && group.titles.includes(columns[tableSort.index][0]) && !group.shown) tableSort = null;
+      renderTable();
+    });
+    label.append(input, document.createTextNode(group.name));
+    groups.append(label);
+  }
+  for (const [title, direction] of metricDirections) {
+    const label = document.createElement('label');
+    label.textContent = title;
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', `Color target for ${title}`);
+    for (const [value, text] of [['none', 'No target'], ['higher', 'Higher is better'], ['lower', 'Lower is better']]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = text;
+      select.append(option);
+    }
+    select.value = direction;
+    select.addEventListener('change', () => {
+      metricDirections.set(title, select.value);
+      renderTable();
+    });
+    label.append(select);
+    $('logbook-color-targets').append(label);
+  }
+  $('logbook-colors').addEventListener('change', renderTable);
+}
+setupLogbookDisplay();
+
 function renderTable() {
   $('table-count').textContent = `${logbookRows.length} SESSIONS`;
+  const shown = columns.map(([title, get], index) => ({ title, get, index }))
+    .filter(({ title }) => title === 'Local date' || logbookGroups.some(group => group.shown && group.titles.includes(title)));
+  const ranges = new Map();
+  if ($('logbook-colors').checked) {
+    for (const { title, index } of shown) {
+      if (!metricDirections.has(title) || metricDirections.get(title) === 'none') continue;
+      const values = logbookRows.map(sortFields[index]).filter(Number.isFinite);
+      if (values.length) ranges.set(title, { min: Math.min(...values), max: Math.max(...values) });
+    }
+  }
   const header = document.createElement('tr');
-  for (const [[title], index] of columns.map((column, index) => [column, index])) {
+  for (const { title, index } of shown) {
     const th = document.createElement('th');
     th.scope = 'col';
     if (tableSort?.index === index) th.setAttribute('aria-sort', tableSort.direction);
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'sort-button';
+    button.dataset.column = String(index);
     button.textContent = `${title}${tableSort?.index === index ? tableSort.direction === 'ascending' ? ' ↑' : ' ↓' : ' ↕'}`;
     button.setAttribute('aria-label', `Sort by ${title}`);
     button.addEventListener('click', () => {
       tableSort = { index, direction: tableSort?.index === index && tableSort.direction === 'ascending' ? 'descending' : 'ascending' };
       renderTable();
-      $('table-head').querySelectorAll('button')[index].focus();
+      $('table-head').querySelector(`[data-column="${index}"]`).focus();
     });
     th.append(button);
     header.append(th);
@@ -624,15 +793,25 @@ function renderTable() {
   for (const a of sortedVisible()) {
     const row = document.createElement('tr');
     if (a.excluded) row.className = 'excluded';
-    for (const [title, get] of columns) {
+    for (const { title, get, index } of shown) {
       const cell = document.createElement('td');
-      if (['ID', 'Local date', 'Activity'].includes(title)) {
+      if (title === 'Local date') {
         const link = document.createElement('a');
         link.href = `#activity=${encodeURIComponent(a.id)}`;
         link.className = 'activity-link';
         link.textContent = get(a);
+        link.title = a.name;
         cell.append(link);
       } else cell.textContent = get(a);
+      const range = ranges.get(title);
+      const direction = metricDirections.get(title);
+      const rating = range ? metricRating(sortFields[index](a), range.min, range.max, direction) : null;
+      if (rating) {
+        cell.className = `metric-${rating}`;
+        const explanation = `${rating === 'good' ? 'Green: favorable' : rating === 'poor' ? 'Red: unfavorable' : 'Yellow: middle'} relative value; ${direction === 'higher' ? 'higher' : 'lower'} is the selected target for ${title}.`;
+        cell.title = explanation;
+        cell.setAttribute('aria-label', `${get(a)}. ${explanation}`);
+      }
       row.append(cell);
     }
     fragment.append(row);
@@ -640,7 +819,7 @@ function renderTable() {
   if (!logbookRows.length) {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
-    cell.colSpan = columns.length;
+    cell.colSpan = shown.length;
     cell.textContent = 'No sessions match these filters.';
     row.append(cell);
     fragment.append(row);

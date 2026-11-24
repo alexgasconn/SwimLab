@@ -158,6 +158,7 @@ h3 { font-size: 14px; font-weight: 550; margin: 0; }
 .record-history-controls { margin-top: 16px; }
 .record-history-controls label { display: inline-grid; gap: 5px; }
 .record-history-chart { max-width: 800px; }
+.record-history-trend { stroke: var(--violet); }
 .chart-note { min-height: 38px; margin: 12px 0 0; font-size: 10px; }
 .grid-line { stroke: #2a3c48; stroke-dasharray: 3 5; stroke-width: .8; }
 .axis-text { fill: #8fa9ba; font-size: 10px; font-family: inherit; }
@@ -189,6 +190,14 @@ h3 { font-size: 14px; font-weight: 550; margin: 0; }
 .environment-metrics > div { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #182d38; }
 .environment-metrics dt { color: var(--muted); font-size: 10px; }
 .environment-metrics dd { margin: 5px 0 0; color: #e8f0f3; font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.stroke-summary-panel { margin-top: 16px; min-width: 0; }
+.stroke-summary-panel h3 { margin-bottom: 16px; }
+.stroke-summary-panel th { padding: 12px; }
+.record-advanced { grid-column: 1 / -1; min-width: 0; }
+.record-advanced summary { color: var(--teal); cursor: pointer; padding: 6px 0; font-size: 11px; }
+.record-advanced .hint { white-space: normal; }
+.record-advanced-metrics { margin-top: 10px; }
+.record-advanced-metrics dd { font-size: 12px; }
 .oceanman-hero { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 28px; border-color: #31515a; background: radial-gradient(ellipse at 85% 15%, #1b5260 0, transparent 48%), linear-gradient(145deg, #142630, #101d27); }
 .oceanman-hero h2 { font-size: clamp(22px, 3vw, 30px); color: #e8f0f3; }
 .oceanman-hero p:last-child { color: var(--muted); font-size: 12px; line-height: 1.7; margin: 10px 0 0; }
@@ -272,6 +281,18 @@ h3 { font-size: 14px; font-weight: 550; margin: 0; }
 .logbook-filters label { display: grid; gap: 7px; }
 .logbook-filters input, .logbook-filters select { font-size: 12px; }
 .filter-error { color: #ffb1a7; font-size: 12px; }
+.logbook-display { margin-bottom: 16px; }
+#logbook-groups { display: flex; flex-wrap: wrap; gap: 12px; border: 0; padding: 0; margin: 0 0 16px; }
+#logbook-groups legend { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+#logbook-groups label, .logbook-color-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }
+.logbook-display input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(--teal); }
+.logbook-display summary { cursor: pointer; font-size: 12px; }
+#logbook-color-targets { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 16px; }
+#logbook-color-targets label { display: grid; gap: 6px; font-size: 11px; color: var(--muted); }
+#logbook-color-targets select { width: 100%; font-size: 11px; }
+#sessions td.metric-good { color: #c0f6d5; background: #194733; }
+#sessions td.metric-medium { color: #ffedb3; background: #4a3e18; }
+#sessions td.metric-poor { color: #ffd2cd; background: #552924; }
 .record-card { padding: 20px 16px; background: linear-gradient(150deg, #193641, #101e28); border: 1px solid #31515a; border-radius: 12px; }
 .record-card h3 { color: var(--teal); font-size: 18px; letter-spacing: -.3px; margin-bottom: 18px; }
 .record-attempt-count { display: block; color: var(--muted); font-size: 11px; margin-top: -12px; margin-bottom: 10px; }
@@ -345,6 +366,10 @@ footer { color: #6f8a9b; font-size: 10px; line-height: 1.9; margin: 32px 0 10px;
   .tabs button[aria-selected=true] { color: #087f78; }
   .tabs button:hover, .sort-button:hover { background: #e5eff1; }
   th { background: #e7f0f2; color: #425f69; }
+  #sessions tr:hover { background: #e5eff1; }
+  #sessions td.metric-good { color: #155c39; background: #d8f2e3; }
+  #sessions td.metric-medium { color: #694f0b; background: #fff0bf; }
+  #sessions td.metric-poor { color: #8c2824; background: #fbdedb; }
   .grid-line { stroke: #cad9dd; }
   .axis-text { fill: #526977; }
   .axis-label { fill: #34545e; }

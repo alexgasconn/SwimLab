@@ -42,10 +42,19 @@ with an unknown distance remain available for data-quality review.
   share, distance, pace, moving time, heart rate and available technique averages,
   plus pool-length breakdowns. Pace is distance-weighted; other averages use
   measured sessions. Pool-length metrics are not applicable to open water.
-- Weekly trends for distance, pace, DPS, SPL, SWOLF, TPL, efficiency and SPM.
+- Training patterns includes a metrics-by-stroke table for freestyle,
+  breaststroke, backstroke and butterfly, separated by pool length and following
+  the dashboard filters. It shows session/length coverage, distance, active time,
+  FIT timer, pace, strokes, SPM, tempo, SPL, DPS, TPL, LPM, SWOLF and swim index.
+  Only lengths with valid distance and duration enter the totals; stroke-derived
+  metrics require counts on every included length. Rates use totals rather than
+  averages of individual length rates. Rests and unrecorded gaps do not enter
+  active time. Session HR and temperature are not attributed to individual styles.
+- Weekly trends for distance, pace, DPS, SPL, SWOLF, TPL, efficiency, SPM and tempo.
   Distance is a weekly total and includes empty weeks as zero. Other metrics
   average measured sessions in each week; their trailing four-week means skip
-  missing weeks. Technique uses pool sessions only. Efficiency is the swim index
+  missing weeks. Tempo and pace include pool and open-water sessions; other
+  technique metrics use pool sessions only. Efficiency is the swim index
   (moving speed in m/s × DPS in m/stroke). Weeks start on Monday, and the mean
   can use earlier weeks outside the selected date range. Four weeks are required.
   The current week is incomplete and is labelled in chart tooltips.
@@ -59,6 +68,14 @@ with an unknown distance remain available for data-quality review.
   Open-water records use whole activities within ±7% of 750/1000/1500/1852
   (nautical mile)/3000/5000 m, ranked by moving time. Actual distance and
   moving pace are shown; shorter activities within a range can rank faster.
+  Each podium entry has a **Show advanced stats** disclosure. Pool statistics
+  identify the exact winning active-length range and use only that effort's
+  lengths, never session technique averages. Effort elapsed time/pace include
+  intervening rests and gaps; active time/pace and stroke metrics exclude them.
+  Missing counts leave stroke-derived values unavailable without removing the
+  timed record. Effort HR and temperature remain unavailable, not replaced by
+  session summaries. Open-water stats use the whole qualifying activity and
+  show its available HR/temperature; pool-length metrics do not apply.
 - Overall stroke mix is weighted by recorded active pool-length distance in the
   filtered view. Drills, mixed and unknown lengths remain in the denominator,
   even though they are not displayed as a separate stroke. Sessions without
@@ -70,6 +87,20 @@ with an unknown distance remain available for data-quality review.
 - Full metric logbook with sortable columns and distance / pool-length filters;
   FIT status, exclusion flags and review controls remain outside the table.
   These filters also apply to CSV export, but not the other dashboard views.
+  Date links open activity detail; ID, activity name and weekday are omitted
+  from the table. Toggle Session, Times, Stroke, Sensors and Stroke mix column
+  groups; Sensors and Stroke mix start hidden. Optional conditional colors use
+  green/yellow/red for favorable/middle/unfavorable values in three equal ranges
+  between each filtered column's minimum and maximum. Targets can be reversed
+  or disabled per metric. Selected defaults favor higher SPM, lower tempo and
+  lower average temperature; higher stroke percentages mean more presence, not
+  better technique. Counts and HR have no default target. Only average temperature
+  is displayed in the table; source minimum/maximum values remain in full exports.
+  SPM, tempo and temperature targets are not universal ideals. Missing and constant
+  values remain uncolored. Compare similar workouts: colors are relative to the
+  current filtered sessions, not absolute performance or health grades.
+  Display settings last until page reload and do not remove columns from CSV
+  or AI exports.
   Reversible per-session review and import warnings remain available.
 - Oceanman tab with the supplied 35-week plan, weekday distance, swim-distance
   summaries, four rolling-volume targets, weighted readiness checks and daily /
@@ -88,7 +119,7 @@ with an unknown distance remain available for data-quality review.
 
 ## Activity lab
 
-Click an activity's ID, date or name in the logbook, a podium date, or a point in
+Click an activity's date in the logbook, a podium date, or a point in
 the pace/SWOLF charts or a route on the map to open its dedicated `#activity=<id>` page. Links can be
 copied and reloaded; Back returns to the previous dashboard tab and its filters.
 The detail page shows the selected activity even if it is excluded from analytics.
@@ -97,11 +128,11 @@ Four internal tabs keep the analysis readable:
 - Overview: session totals, stroke distance shares and a timestamped length/rest ribbon.
 - Sets & lengths: a chronological, expandable list of detected sets and recorded rests.
   Active lengths stay in the same set until a recorded rest, even across stroke changes
-  or timing anomalies; unrecorded gaps within a set are shown when expanded. Sets show DPS, SPM and mean SWOLF
+  or timing anomalies; unrecorded gaps within a set are shown when expanded. Sets show DPS, SPM, tempo and mean SWOLF
   at a glance, plus stroke count, SPL, TPL, LPM, swim index, timing and sample-weighted
   heart rate when expanded. Stroke-derived set metrics require recorded counts for
   every length; missing values are not estimated. The tab also has pace/stroke charts and
-  a detailed table including duration, timer, DPS, SPM, LPM, SWOLF and aligned HR.
+  a detailed table including duration, timer, DPS, SPM, tempo, LPM, SWOLF and aligned HR.
 - Technique & trends: per-stroke/pool-length charts, first/last-quarter medians
   (minimum eight measured lengths), and descriptive Pearson correlations
   (minimum five varying pairs). Shared metric formulas are not evidence of causation.
@@ -132,8 +163,15 @@ Overall pace is distance-weighted, using only sessions with both metrics.
 Moving ratio = moving / elapsed; SPM = strokes / moving minutes;
 SPL = strokes / active lengths; DPS = distance / strokes;
 TPL = moving seconds / active lengths; LPM = active lengths / moving minutes.
-SPM follows the device's stroke-count convention: no assumed doubling of arm strokes.
-The source-reported cadence is also retained in the database.
+Tempo = 60 / SPM in seconds per recorded stroke, unavailable when SPM is missing
+or non-positive. Session SPM is calculated from session strokes and moving time;
+length and set SPM use recorded strokes and elapsed length durations, excluding
+rests. Set tempo uses the totals, not the mean of length tempos. Summary and
+weekly tempo are means of available session tempos, not 60 / mean SPM.
+SPM and tempo follow the device's stroke-count convention: no assumed doubling of
+arm strokes. Tempo represents the time between entries of the same hand only if
+the recorded count represents that cycle. The source-reported cadence is retained
+in the database but is not substituted for missing calculated SPM.
 In particular, LPM is *not* cadence or strokes per minute.
 
 The list API's pool length is in centimetres; decoded FIT pool length is in metres.
@@ -160,7 +198,9 @@ category, with equally spaced labels for all target distances, and is found in
 Performance. Open a distance card's progress button to compare each week's or month's best time
 with the cumulative best through that period, using all qualifying sessions in
 the current filters, independently of the podium size. Weeks start on Monday;
-periods without efforts have no point. Open-water pace uses the actual distance
+periods without efforts have no point. The dashed trend smooths the mean of up
+to the last three periods with efforts and connects gaps; at least two periods
+are needed. Open-water pace uses the actual distance
 of the fastest-time activity, which may not be the fastest-paced activity.
 Fastest session uses moving pace and a minimum 100 m session distance.
 Record cards highlight total effort time (including rests) and show pace per 100 m.

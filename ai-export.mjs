@@ -30,9 +30,9 @@ export function swimmerContext({ activities, lengths, records, columns, filters,
     ...summary.poolLengths.map(row => [row.length == null ? 'Piscina sin longitud' : `Piscina ${number(row.length)} m`, row])];
   sections.push('## Resumen por entorno y longitud de piscina\nEl ritmo es ponderado por distancia; las demás medias usan las sesiones con datos disponibles.\n' +
     table(['Entorno', 'Sesiones', 'Distancia m', 'Media m', 'Ritmo /100 m', 'Movimiento medio s', 'FC media bpm',
-      'SPM', 'DPS m/brazada', 'SPL', 'TPL s', 'LPM', 'SWOLF', 'Índice de nado'],
+      'SPM', 'Tempo medio s/brazada', 'DPS m/brazada', 'SPL', 'TPL s', 'LPM', 'SWOLF', 'Índice de nado'],
     summaryRows.map(([name, row]) => [name, row.sessions, number(row.distance), number(row.averageDistance),
-      paceLabel(row.averagePace), number(row.averageMovingTime), number(row.averageHeartRate), number(row.averageSpm),
+      paceLabel(row.averagePace), number(row.averageMovingTime), number(row.averageHeartRate), number(row.averageSpm), number(row.averageTempo),
       number(row.averageDps), number(row.averageSpl), number(row.averageTpl), number(row.averageLpm),
       number(row.averageSwolf), number(row.averageEfficiency)])));
   sections.push(`## Estilos en piscina\n${number(mix.total)} m de largos activos registrados en ${mix.sessions} de ${mix.poolSessions} sesiones de piscina. Incluye largos no clasificados; no incluye aguas abiertas.\n` +
@@ -46,7 +46,7 @@ export function swimmerContext({ activities, lengths, records, columns, filters,
       weekly.get(week.date)[metric] = week.value;
     }
   }
-  sections.push('## Tendencias semanales\nSemanas desde el lunes; distancia total en km (cero si no hay sesión). Ritmo es media de sesiones en segundos/100 m; técnica: medias de sesiones de piscina. La semana actual está incompleta.\n' +
+  sections.push('## Tendencias semanales\nSemanas desde el lunes; distancia total en km (cero si no hay sesión). Ritmo y tempo: medias de sesiones de piscina y aguas abiertas; otras métricas técnicas: medias de sesiones de piscina. La semana actual está incompleta.\n' +
     table(['Inicio', 'Incompleta', ...metrics.map(metric => weeklyMetrics[metric].label)],
       [...weekly.values()].map(week => [week.date, week.partial ? 'sí' : 'no', ...metrics.map(metric => number(week[metric]))])));
   const categories = Object.entries(records).filter(([key]) => key !== 'attempts');
@@ -67,7 +67,7 @@ export function swimmerContext({ activities, lengths, records, columns, filters,
       readiness.checks.map(check => [check.title, check.status, check.display, number(check.progress), check.weight, check.base, check.description])) +
     '\n\n' + table(['Ventana días', 'Distancia km', 'Objetivo km', 'Progreso %'],
       rolling.map(row => [row.days, number(row.actualKm), number(row.targetKm), number(row.progress)])));
-  sections.push(`## Logbook completo (${activities.length} sesiones)\nTiempos de sesión en horas:minutos:segundos; ritmo en minutos:segundos por 100 m. FC = frecuencia cardíaca; SPM = brazadas/minuto en movimiento; SPL = brazadas/largo; DPS = metros/brazada; TPL = segundos en movimiento/largo; LPM = largos/minuto en movimiento. Los motivos de revisión son indicadores, no pruebas de error.\n` +
+  sections.push(`## Logbook completo (${activities.length} sesiones)\nTiempos de sesión en horas:minutos:segundos; ritmo en minutos:segundos por 100 m. FC = frecuencia cardíaca; SPM = brazadas/minuto en movimiento; tempo = 60 / SPM en segundos por brazada registrada, sin duplicar: solo representa un ciclo del mismo brazo si el dispositivo cuenta ciclos de ese modo. SPL = brazadas/largo; DPS = metros/brazada; TPL = segundos en movimiento/largo; LPM = largos/minuto en movimiento. Los motivos de revisión son indicadores, no pruebas de error.\n` +
     table(columns.map(([title]) => title), [...activities]
       .sort((a, b) => localDate(b.date) - localDate(a.date))
       .map(activity => columns.map(([, get]) => get(activity)))));

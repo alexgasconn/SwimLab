@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activityAnalysis, lengthTrend, lengthCorrelation } from './analytics.mjs';
+import { activityAnalysis, lengthTrend, lengthCorrelation, metricRating, strokeSummary } from './analytics.mjs';
+
+test('conditional metric ratings reverse direction and skip missing or constant values', () => {
+  assert.deepEqual([0, 5, 10].map(value => metricRating(value, 0, 10, 'higher')), ['poor', 'medium', 'good']);
+  assert.deepEqual([0, 5, 10].map(value => metricRating(value, 0, 10, 'lower')), ['good', 'medium', 'poor']);
+  for (const value of [null, undefined, NaN, Infinity]) assert.equal(metricRating(value, 0, 10, 'higher'), null);
+  assert.equal(metricRating(5, 5, 5, 'higher'), null);
+  assert.equal(metricRating(0.82, 0.8199999999999998, 0.8200000000000001, 'higher'), null);
+  assert.equal(metricRating(5, 0, 10, 'none'), null);
+  assert.equal(metricRating(5, null, 10, 'higher'), null);
+});
 
 test('activity analysis groups active lengths by rests and reports internal gaps', () => {
   const activity = { id: 'a', type: 'pool', distance: 125, poolLength: 25 };
@@ -24,20 +34,24 @@ test('activity analysis groups active lengths by rests and reports internal gaps
   assert.equal(details.active[0].swolf, 35);
   assert.equal(details.active[0].dps, 2.5);
   assert.equal(details.active[0].spm, 24);
+  assert.equal(details.active[0].tempo, 2.5);
   assert.equal(details.active[0].lpm, 2.4);
   assert.equal(details.active[0].heartRate, 130);
   assert.equal(details.active[0].hrSamples, 2);
   assert.equal(details.active[1].heartRate, 160);
   assert.equal(details.active[1].swolf, null);
+  assert.equal(details.active[1].tempo, null);
   assert.equal(details.active[1].dps, null);
   assert.equal(details.active[3].spl, 0);
   assert.equal(details.active[3].dps, null);
+  assert.equal(details.active[3].tempo, null);
   assert.equal(details.active[3].swolf, 30);
   assert.equal(details.active[4].heartRate, null);
   assert.equal(details.rows[2].index, null);
   assert.equal(details.hr.max, 160);
   const [partial, complete] = details.blocks;
   assert.equal(partial.metrics.strokes, null);
+  assert.equal(partial.metrics.tempo, null);
   assert.equal(partial.metrics.swolf, null);
   assert.equal(partial.metrics.timerTime, null);
   assert.equal(partial.metrics.tpl, 25);
@@ -97,9 +111,13 @@ test('swim interval metrics use totals across recorded lengths, without rest', (
   const [interval] = activityAnalysis(activity, lengths).intervals;
   assert.equal(interval.elapsed, 55);
   assert.deepEqual(interval.metrics, {
-    strokes: 25, timerTime: 48, dps: 2, spl: 12.5, spm: 30, swolf: 37.5,
+    strokes: 25, timerTime: 48, dps: 2, spl: 12.5, spm: 30, tempo: 2, swolf: 37.5,
     tpl: 25, lpm: 2.4, efficiency: 2, heartRate: null, hrSamples: 0,
   });
+  lengths[1].strokes = 5;
+  const varied = activityAnalysis(activity, lengths).blocks[0];
+  assert.equal(varied.metrics.tempo, 50 / 15);
+  assert.notEqual(varied.metrics.tempo, (varied.rows[0].tempo + varied.rows[1].tempo) / 2);
 });
 
 test('activity detail flags invalid timing and distance without synthesizing lengths or HR', () => {
@@ -191,6 +209,98 @@ test('weekly technique ignores missing measurements and open water; swim index u
   assert.equal(index[3].partial, true);
   assert.deepEqual(weeklyTrend(rows, now, 'swolf').map(w => w.value), [40, null, null, 44]);
   assert.deepEqual(weeklyTrend(rows, now, 'pace').map(w => w.value), [150, 100, null, 100]);
+  assert.deepEqual(weeklyTrend(rows, now, 'tempo').map(w => w.value), [3, 10, null, 4]);
+});
+
+test('tempo uses positive calculated stroke frequency and averages session tempos', () => {
+  const first = activity({ strokes: 46, movingTime: 60, reportedSpm: 90 });
+  const second = activity({ strokes: 30, movingTime: 60 });
+  assert.ok(Math.abs(first.tempo - 60 / 46) < 1e-12);
+  assert.equal(second.tempo, 2);
+  assert.equal(activity({ strokes: 0 }).tempo, null);
+  assert.equal(activity({ strokes: null, reportedSpm: 46 }).tempo, null);
+  assert.equal(activity({ strokes: 46, movingTime: 0 }).tempo, null);
+  assert.equal(activity({ strokes: -1 }).tempo, null);
+  assert.equal(trainingSummary([first, second]).pool.averageTempo, (60 / 46 + 2) / 2);
+  assert.equal(trainingSummary([activity({ strokes: null })]).pool.averageTempo, null);
+});
+
+test('stroke metrics use matching FIT lengths and separate styles, pools and missing measurements', () => {
+  const activities = [activity({ id: 'a', heartRate: 150 }), activity({ id: 'b', poolLength: 50 }),
+    activity({ id: 'ow', type: 'open_water' })];
+  const lengths = [
+    { activityId: 'a', stroke: 'freestyle', distance: 25, duration: 20, strokes: 10, start: 0 },
+    { activityId: 'a', stroke: 'freestyle', distance: 25, duration: 30, strokes: 5, start: 1000 },
+    { activityId: 'a', stroke: 'breaststroke', distance: 25, duration: 40, strokes: 20 },
+    { activityId: 'a', stroke: 'backstroke', distance: 25, duration: 20, strokes: 0 },
+    { activityId: 'a', stroke: 'butterfly', distance: 25, duration: null, strokes: 9 },
+    { activityId: 'a', stroke: 'unknown', distance: 25, duration: 10, strokes: 10 },
+    { activityId: 'b', stroke: 'freestyle', distance: 50, duration: 40, strokes: 20 },
+    { activityId: 'ow', stroke: 'freestyle', distance: 100, duration: 40, strokes: 20 },
+    { activityId: 'filtered-out', stroke: 'freestyle', distance: 25, duration: 40, strokes: 20 },
+  ].map(row => ({ ...row, active: true }));
+  const groups = strokeSummary(activities, [...lengths,
+    { activityId: 'a', active: false, stroke: 'freestyle', distance: 25, duration: 500, strokes: 0 }]);
+  assert.deepEqual(groups.map(group => group.poolLength), [25, 50]);
+  const [free, breast, back, fly] = groups[0].strokes;
+  assert.equal(free.sessions, 1);
+  assert.equal(free.lengths, 2);
+  assert.equal(free.measuredLengths, 2);
+  assert.equal(free.countedLengths, 2);
+  assert.equal(free.distance, 50);
+  assert.equal(free.duration, 50);
+  assert.equal(free.pace, 100);
+  assert.equal(free.metrics.tempo, 50 / 15);
+  assert.equal(free.metrics.dps, 50 / 15);
+  assert.equal(free.metrics.spl, 7.5);
+  assert.equal(free.metrics.swolf, 32.5);
+  assert.equal(free.metrics.heartRate, null);
+  assert.equal(breast.metrics.tempo, 2);
+  assert.equal(back.metrics.strokes, 0);
+  assert.equal(back.metrics.tempo, null);
+  assert.equal(fly.lengths, 1);
+  assert.equal(fly.measuredLengths, 0);
+  assert.equal(fly.metrics.tempo, null);
+  assert.equal(groups[1].strokes[0].metrics.tempo, 2);
+  lengths[1].strokes = null;
+  const partial = strokeSummary(activities, lengths)[0].strokes[0];
+  assert.equal(partial.countedLengths, 1);
+  assert.equal(partial.metrics.tempo, null);
+  assert.equal(partial.metrics.dps, null);
+  assert.equal(partial.metrics.tpl, 25);
+  assert.equal(partial.pace, 100);
+  assert.deepEqual(strokeSummary([], lengths), []);
+});
+
+test('advanced record metrics belong to the fastest exact effort, not the whole session', () => {
+  const swim = activity({ heartRate: 160, temperature: 22 });
+  const lengths = Array.from({ length: 8 }, (_, index) => ({
+    activityId: swim.id, sequence: index, active: true, distance: 25, stroke: 'freestyle',
+    start: index < 4 ? index * 45 : 200 + (index - 4) * 25,
+    duration: index < 4 ? 40 : 20, timerTime: index < 4 ? 39 : 19, strokes: index < 4 ? 20 : 10,
+  }));
+  const record = personalBests([swim], lengths)['100m freestyle'][0];
+  assert.equal(record.value, 95);
+  assert.equal(record.distance, 100);
+  assert.equal(record.metrics.firstLength, 5);
+  assert.equal(record.metrics.lastLength, 8);
+  assert.equal(record.metrics.activeTime, 80);
+  assert.equal(record.metrics.elapsedTime, 95);
+  assert.equal(record.metrics.timerTime, 76);
+  assert.equal(record.metrics.strokes, 40);
+  assert.equal(record.metrics.tempo, 2);
+  assert.equal(record.metrics.spm, 30);
+  assert.equal(record.metrics.swolf, 30);
+  assert.equal(record.metrics.dps, 2.5);
+  assert.equal(record.metrics.movingRatio, 80 / 95);
+  assert.equal(record.metrics.activePace, 80);
+  assert.equal(record.metrics.heartRate, null);
+  assert.equal(record.metrics.temperature, undefined);
+  lengths[7].strokes = null;
+  const incomplete = personalBests([swim], lengths)['100m freestyle'][0];
+  assert.equal(incomplete.value, 95);
+  assert.equal(incomplete.metrics.tempo, null);
+  assert.equal(incomplete.metrics.strokes, null);
 });
 
 test('records require exact FIT windows, include rests, and do not estimate from session averages', () => {
@@ -301,6 +411,9 @@ test('open-water records rank whole activities by moving time within inclusive 7
   assert.equal(records.attempts['1000m open water'], 2);
   assert.deepEqual(records['1000m open water'].map(row => [row.id, row.duration, row.distance]), [['lower', 800, 930]]);
   assert.equal(records['1000m open water'][0].pace, 800 * 100 / 930);
+  assert.equal(records['1000m open water'][0].metrics.tempo, 2);
+  assert.equal(records['1000m open water'][0].metrics.lengths, null);
+  assert.equal(records['1000m open water'][0].metrics.swolf, null);
   assert.equal(records['1852m open water'][0].id, 'mile');
   assert.equal(records['3000m open water'][0].id, 'three');
   assert.equal(records['5000m open water'][0].id, 'five');
