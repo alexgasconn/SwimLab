@@ -42,24 +42,23 @@ export function activityAnalysis(activity, lengths = [], records = []) {
   });
   const active = rows.filter(r => r.active && r.pace != null);
   const blocks = [];
-  let block = null, previous = null;
+  let block = null;
   for (const row of rows) {
-    if (!row.active || row.pace == null) { block = null; previous = row; continue; }
-    const gap = previous?.end != null && Number.isFinite(row.start) ? row.start - previous.end : null;
-    if (!block || block.stroke !== row.stroke || gap > 15 || gap < -0.5 || row.sequence !== previous.sequence + 1) {
-      block = { number: blocks.length + 1, stroke: row.stroke, rows: [] };
+    if (!row.active) { block = null; continue; }
+    if (!block) {
+      block = { number: blocks.length + 1, stroke: row.stroke, mixed: false, rows: [], gaps: [] };
       blocks.push(block);
     }
+    if (row.stroke !== block.stroke) block.mixed = true;
     block.rows.push(row);
-    previous = row;
   }
   for (const b of blocks) {
-    b.distance = b.rows.reduce((sum, r) => sum + r.distance, 0);
-    b.duration = b.rows.reduce((sum, r) => sum + r.duration, 0);
-    b.pace = b.duration * 100 / b.distance;
+    b.distance = b.rows.every(r => positive(r.distance)) ? b.rows.reduce((sum, r) => sum + r.distance, 0) : null;
+    b.duration = b.rows.every(r => positive(r.duration)) ? b.rows.reduce((sum, r) => sum + r.duration, 0) : null;
+    b.pace = divide(b.duration == null ? null : b.duration * 100, b.distance);
     b.start = b.rows[0].start;
     b.end = b.rows.at(-1).end;
-    b.elapsed = Number.isFinite(b.start) && b.end != null ? b.end - b.start : null;
+    b.elapsed = Number.isFinite(b.start) && b.end != null && b.end >= b.start ? b.end - b.start : null;
     const count = b.rows.length;
     const strokes = b.rows.every(r => r.spl != null) ? b.rows.reduce((sum, r) => sum + r.spl, 0) : null;
     const timerTime = b.rows.every(r => nonnegative(r.timerTime) != null)
@@ -69,9 +68,9 @@ export function activityAnalysis(activity, lengths = [], records = []) {
     b.metrics = {
       strokes, timerTime, dps, spl: divide(strokes, count),
       spm: divide(strokes == null ? null : strokes * 60, b.duration),
-      swolf: strokes == null ? null : (b.duration + strokes) / count,
-      tpl: b.duration / count, lpm: count * 60 / b.duration,
-      efficiency: dps == null ? null : b.distance / b.duration * dps,
+      swolf: strokes == null || b.duration == null ? null : (b.duration + strokes) / count,
+      tpl: divide(b.duration, count), lpm: divide(count * 60, b.duration),
+      efficiency: dps == null || b.duration == null ? null : b.distance / b.duration * dps,
       heartRate: divide(b.rows.reduce((sum, r) => sum + r.heartRate * r.hrSamples, 0), hrSamples),
       hrSamples,
     };
@@ -80,15 +79,19 @@ export function activityAnalysis(activity, lengths = [], records = []) {
   const starts = [...timed.map(r => r.start), ...samples.map(r => r.timestamp)];
   const origin = starts.length ? starts.reduce((min, value) => Math.min(min, value), Infinity) : null;
   const blockByFirst = new Map(blocks.map(b => [b.rows[0], b]));
+  const blockByRow = new Map(blocks.flatMap(b => b.rows.map(row => [row, b])));
   const intervals = [];
   let latestEnd = null;
   for (const row of rows) {
     if (Number.isFinite(row.start) && latestEnd != null && row.start - latestEnd > 15) {
-      intervals.push({ kind: 'gap', start: latestEnd, duration: row.start - latestEnd });
+      const gap = { kind: 'gap', start: latestEnd, duration: row.start - latestEnd };
+      const containingBlock = blockByRow.get(row);
+      if (containingBlock && row !== containingBlock.rows[0]) containingBlock.gaps.push(gap);
+      else intervals.push(gap);
     }
     if (blockByFirst.has(row)) intervals.push({ ...blockByFirst.get(row), kind: 'swim' });
     if (!row.active) intervals.push({ kind: 'rest', start: row.start, duration: positive(row.duration) });
-    if (row.end != null) latestEnd = Math.max(latestEnd ?? row.end, row.end);
+    latestEnd = row.end != null ? Math.max(latestEnd ?? row.end, row.end) : null;
   }
   const heartRates = samples.map(r => positive(r.heartRate)).filter(v => v != null);
   const hrGaps = samples.slice(1).map((r, i) => r.timestamp - samples[i].timestamp).filter(v => v > 0);
@@ -96,7 +99,7 @@ export function activityAnalysis(activity, lengths = [], records = []) {
   const invalid = rows.filter(r => r.active && r.pace == null).length;
   if (invalid) warnings.push(`${invalid} active lengths have missing distance or duration and cannot enter pace analysis.`);
   if (timed.length !== rows.length && rows.length) warnings.push(`${rows.length - timed.length} lengths lack valid timing; they are omitted from the time ribbon and HR alignment.`);
-  if (timed.some((r, i) => i && r.start < timed[i - 1].end - 0.5)) warnings.push('FIT length intervals overlap. Detected blocks are split at overlaps; check sensor recording.');
+  if (timed.some((r, i) => i && r.start < timed[i - 1].end - 0.5)) warnings.push('FIT length intervals overlap; check sensor recording. Sets remain grouped until a recorded rest.');
   if (activity.type === 'pool' && active.length && Math.abs(active.reduce((sum, r) => sum + r.distance, 0) - activity.distance) > Math.max(2, activity.distance * 0.02)) {
     warnings.push('Recorded length distance differs from the session summary; length charts use FIT lengths, not rescaled values.');
   }

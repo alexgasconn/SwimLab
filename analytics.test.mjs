@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { activityAnalysis, lengthTrend, lengthCorrelation } from './analytics.mjs';
 
-test('activity analysis computes measured length metrics, aligns HR and detects rests, gaps and stroke changes', () => {
+test('activity analysis groups active lengths by rests and reports internal gaps', () => {
   const activity = { id: 'a', type: 'pool', distance: 125, poolLength: 25 };
   const lengths = [
     { sequence: 0, start: 0, duration: 25, active: true, distance: 25, strokes: 10, stroke: 'freestyle' },
@@ -16,10 +16,10 @@ test('activity analysis computes measured length metrics, aligns HR and detects 
     [{ timestamp: 0, heartRate: 120 }, { timestamp: 20, heartRate: 140 }, { timestamp: 25, heartRate: 160 }, { timestamp: 55, heartRate: 100 }]);
   assert.equal(details.origin, 0);
   assert.deepEqual(details.intervals.map(i => [i.kind, i.start, i.duration]), [
-    ['swim', 0, 50], ['rest', 50, 20], ['swim', 70, 30], ['gap', 100, 20],
-    ['swim', 120, 30], ['swim', 150, 25],
+    ['swim', 0, 50], ['rest', 50, 20], ['swim', 70, 85],
   ]);
-  assert.deepEqual(details.blocks.map(b => [b.stroke, b.distance]), [['freestyle', 50], ['backstroke', 25], ['backstroke', 25], ['freestyle', 25]]);
+  assert.deepEqual(details.blocks.map(b => [b.stroke, b.mixed, b.distance]), [['freestyle', false, 50], ['backstroke', true, 75]]);
+  assert.deepEqual(details.blocks[1].gaps, [{ kind: 'gap', start: 100, duration: 20 }]);
   assert.equal(details.active[0].pace, 100);
   assert.equal(details.active[0].swolf, 35);
   assert.equal(details.active[0].dps, 2.5);
@@ -44,6 +44,48 @@ test('activity analysis computes measured length metrics, aligns HR and detects 
   assert.equal(partial.metrics.hrSamples, 3);
   assert.equal(partial.metrics.heartRate, 140);
   assert.equal(complete.metrics.heartRate, null);
+});
+
+test('only recorded rests split sets despite stroke changes, overlap, gaps or missing length metrics', () => {
+  const activity = { id: 'a', type: 'pool', distance: 125 };
+  const lengths = [
+    { sequence: 0, active: true, start: 0, duration: 25, distance: 25, strokes: 10, stroke: 'breaststroke' },
+    { sequence: 1, active: true, start: 24, duration: 25, distance: 25, strokes: 10, stroke: 'freestyle' },
+    { sequence: 3, active: true, start: 70, duration: null, distance: 25, strokes: 10, stroke: 'freestyle' },
+    { sequence: 4, active: false, start: 100, duration: 10 },
+    { sequence: 5, active: true, start: 110, duration: 25, distance: 25, strokes: 10, stroke: 'freestyle' },
+  ].map(row => ({ ...row, activityId: 'a' }));
+  const details = activityAnalysis(activity, lengths);
+  assert.deepEqual(details.intervals.map(row => row.kind), ['swim', 'rest', 'swim']);
+  const [first, second] = details.blocks;
+  assert.equal(first.rows.length, 3);
+  assert.equal(first.mixed, true);
+  assert.equal(first.distance, 75);
+  assert.equal(first.duration, null);
+  assert.equal(first.pace, null);
+  assert.equal(first.metrics.swolf, null);
+  assert.equal(first.metrics.spm, null);
+  assert.equal(first.metrics.tpl, null);
+  assert.equal(first.metrics.lpm, null);
+  assert.equal(first.gaps.length, 1);
+  assert.equal(second.distance, 25);
+  assert.ok(details.warnings.some(warning => warning.includes('overlap')));
+
+  lengths[1].distance = null;
+  const missingDistance = activityAnalysis(activity, lengths).blocks[0];
+  assert.equal(missingDistance.distance, null);
+  assert.equal(missingDistance.metrics.dps, null);
+});
+
+test('an uninterrupted 800m remains one set despite FIT timestamp rounding overlaps', () => {
+  const activity = { id: 'a', type: 'pool', distance: 800 };
+  const lengths = Array.from({ length: 40 }, (_, i) => ({
+    activityId: 'a', sequence: i, active: true, distance: 20,
+    start: Math.round(i * 21.75), duration: 21.75, stroke: 'freestyle', strokes: 10,
+  }));
+  const details = activityAnalysis(activity, lengths);
+  assert.deepEqual(details.blocks.map(block => block.distance), [800]);
+  assert.equal(details.blocks[0].rows.length, 40);
 });
 
 test('swim interval metrics use totals across recorded lengths, without rest', () => {

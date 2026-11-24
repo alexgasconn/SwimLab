@@ -188,9 +188,9 @@ function intervalMetrics(values) {
 }
 
 function renderLengths(container, details) {
-  container.append(node('h2', '', 'Inside the session'), node('p', 'hint', 'Blocks are detected from consecutive active lengths of the same stroke, broken by recorded rest, >15 s gaps, missing lengths or overlaps. They are not official Garmin laps or a claimed workout prescription.'));
+  container.append(node('h2', '', 'Inside the session'), node('p', 'hint', 'Sets group active lengths until a recorded rest, even if stroke changes or timestamps overlap. Unrecorded gaps are not assumed to be rests. These are not official Garmin laps or a claimed workout prescription.'));
   if (!details.rows.length) { container.append(node('p', 'empty', 'No FIT lengths are available for this activity.')); return; }
-  const blocks = panel(container, 'Swim intervals', 'Expand each set for more metrics and its lengths. Metrics use recorded active lengths only; -- means unavailable. Recorded rests and unrecorded gaps are separate.');
+  const blocks = panel(container, 'Swim intervals', 'Expand each set for more metrics and its lengths. Metrics use recorded active lengths only; -- means unavailable. Unrecorded gaps inside sets are shown when expanded.');
   lengthRibbon(blocks, details.rows, details.origin);
   const list = node('div', 'swim-intervals');
   blocks.append(list);
@@ -208,7 +208,7 @@ function renderLengths(container, details) {
     row.style.setProperty('--stroke-color', strokeColors[block.stroke] ?? '#78879a');
     const label = node('summary', 'interval-summary');
     const stroke = node('span', 'interval-stroke');
-    stroke.append(node('strong', '', `Set ${block.number} · ${strokeName(block.stroke)}`),
+    stroke.append(node('strong', '', `Set ${block.number} · ${block.mixed ? 'Mixed strokes' : strokeName(block.stroke)}`),
       node('small', '', `${block.rows.length} lengths`));
     const pace = node('span', 'interval-pace');
     pace.append(node('strong', '', time(block.duration)), node('small', '', `${paceLabel(block.pace)} /100 m`));
@@ -224,12 +224,16 @@ function renderLengths(container, details) {
     for (const r of block.rows) {
       const tile = node('span', 'length-tile', r.index);
       tile.tabIndex = 0;
-      tile.title = `Length ${r.index}: ${format(r.distance)} m · ${time(r.duration)} · ${paceLabel(r.pace)}/100 m · ${format(r.strokes)} strokes`;
+      tile.style.setProperty('--stroke-color', strokeColors[r.stroke] ?? '#78879a');
+      tile.title = `Length ${r.index} · ${strokeName(r.stroke)}: ${format(r.distance)} m · ${time(r.duration)} · ${paceLabel(r.pace)}/100 m · ${format(r.strokes)} strokes`;
       tile.setAttribute('aria-label', tile.title);
       ribbon.append(tile);
     }
     const detail = node('div', 'interval-detail');
     detail.append(extra, ribbon);
+    for (const gap of block.gaps) {
+      detail.append(node('p', 'hint', `Unrecorded gap at ${time(gap.start - details.origin)}: ${time(gap.duration)}. Not assumed to be rest.`));
+    }
     row.append(label, detail);
     list.append(row);
   }

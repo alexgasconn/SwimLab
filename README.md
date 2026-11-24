@@ -88,8 +88,9 @@ The detail page shows the selected activity even if it is excluded from analytic
 
 Four internal tabs keep the analysis readable:
 - Overview: session totals, stroke distance shares and a timestamped length/rest ribbon.
-- Sets & lengths: a chronological, expandable list of detected sets and recorded rests,
-  with unrecorded gaps identified separately. Sets show DPS, SPM and mean SWOLF
+- Sets & lengths: a chronological, expandable list of detected sets and recorded rests.
+  Active lengths stay in the same set until a recorded rest, even across stroke changes
+  or timing anomalies; unrecorded gaps within a set are shown when expanded. Sets show DPS, SPM and mean SWOLF
   at a glance, plus stroke count, SPL, TPL, LPM, swim index, timing and sample-weighted
   heart rate when expanded. Stroke-derived set metrics require recorded counts for
   every length; missing values are not estimated. The tab also has pace/stroke charts and
@@ -109,8 +110,9 @@ average never becomes an invented temporal curve or personalized HR zones.
 
 Length SWOLF is elapsed length seconds + recorded strokes; it may differ from the
 Garmin summary. Length HR averages only samples in `[start, end)` and is not
-time-weighted. Block boundaries come from rest, stroke changes, >15-second gaps,
-missing/invalid lengths and overlaps; blocks are **inferred, not official Garmin laps**.
+time-weighted. Block boundaries come only from recorded rests; gaps and overlaps
+do not prove a rest. Blocks are **inferred, not official Garmin laps**. Missing
+distance or duration makes affected set totals and metrics unavailable.
 Blank timeline intervals are unrecorded, not assumed to be rest. OW pace is
 `100 / recorded speed` and remains susceptible to GPS noise. Synthetic sensor
 samples are available only in the clearly labelled demo.
