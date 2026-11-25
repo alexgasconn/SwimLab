@@ -325,6 +325,41 @@ test('records require exact FIT windows, include rests, and do not estimate from
   assert.equal(personalBests([a], lengths)['100m freestyle'].length, 0);
 });
 
+test('a 400m effort with one misclassified first length qualifies for its dominant stroke', () => {
+  const swim = activity({ date: '2026-11-24', poolLength: 25 });
+  const lengths = Array.from({ length: 16 }, (_, i) => ({
+    activityId: swim.id, sequence: i, active: true, distance: 25,
+    start: i * 30, duration: 30, stroke: i === 0 ? 'breaststroke' : 'freestyle',
+  }));
+  const records = personalBests([swim], lengths);
+  assert.equal(records['400m freestyle'][0].value, 480);
+  assert.equal(records['400m freestyle'][0].metrics.firstLength, 1);
+  assert.equal(records.attempts['400m freestyle'], 1);
+  assert.equal(records['400m breaststroke'].length, 0);
+});
+
+test('stroke record threshold is inclusive and weighted by effort distance for every stroke', () => {
+  for (const stroke of ['freestyle', 'breaststroke', 'backstroke', 'butterfly']) {
+    const swim = activity({ id: stroke });
+    const lengths = Array.from({ length: 10 }, (_, i) => ({
+      activityId: swim.id, sequence: i, active: true, distance: 20,
+      start: i * 30, duration: 30, stroke: i === 0 ? 'unknown' : stroke,
+    }));
+    assert.equal(personalBests([swim], lengths)['200m ' + stroke][0].value, 300);
+    lengths[1].stroke = 'drill';
+    assert.equal(personalBests([swim], lengths)['200m ' + stroke].length, 0);
+
+    lengths[0].distance = 10;
+    lengths[1].distance = 20;
+    lengths[2].distance = 30;
+    lengths[1].stroke = stroke;
+    assert.equal(personalBests([swim], lengths)['200m ' + stroke][0].value, 300);
+    lengths[0].distance = 30;
+    lengths[2].distance = 10;
+    assert.equal(personalBests([swim], lengths)['200m ' + stroke].length, 0);
+  }
+});
+
 test('IM records enforce ordered equal legs; bad times and wrong strokes never qualify', () => {
   const a = activity();
   const lengths = ['butterfly', 'backstroke', 'breaststroke', 'freestyle'].map((stroke, i) => ({
@@ -338,6 +373,18 @@ test('IM records enforce ordered equal legs; bad times and wrong strokes never q
   lengths[0].duration = 30;
   lengths[1].start = 0;
   assert.equal(personalBests([a], lengths)['100m IM'].length, 0);
+});
+
+test('80m IM requires four ordered 20m legs', () => {
+  const swim = activity({ poolLength: 20 });
+  const lengths = ['butterfly', 'backstroke', 'breaststroke', 'freestyle'].map((stroke, i) => ({
+    activityId: swim.id, sequence: i, active: true, distance: 20, start: i * 30, duration: 30, stroke,
+  }));
+  const records = personalBests([swim], lengths);
+  assert.equal(records['80m IM'][0].value, 120);
+  assert.equal(records.attempts['80m IM'], 1);
+  lengths[1].stroke = 'freestyle';
+  assert.equal(personalBests([swim], lengths)['80m IM'].length, 0);
 });
 
 test('500m and 1000m records use exact lengths in a 20m pool', () => {
@@ -390,7 +437,7 @@ test('every stroke has all requested distances and IM has only the requested dis
   for (const distance of [100, 200, 400]) assert.equal(imRecords[`${distance}m IM`][0].id, `im${distance}`);
   assert.deepEqual(Object.keys(records).filter(key => key !== 'attempts').sort(), [
     ...strokes.flatMap(stroke => distances.map(distance => `${distance}m ${stroke}`)),
-    '100m IM', '200m IM', '400m IM',
+    '80m IM', '100m IM', '200m IM', '400m IM',
     ...[750, 1000, 1500, 1852, 3000, 5000].map(distance => `${distance}m open water`),
   ].sort());
 });

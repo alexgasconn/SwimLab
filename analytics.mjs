@@ -344,7 +344,7 @@ export const openWaterRecordDistances = [
 ];
 const openWaterKey = distance => `${distance}m open water`;
 const categories = [
-  ...[100, 200, 400].map(distance => ({ key: `${distance}m IM`, distance, medley: true })),
+  ...[80, 100, 200, 400].map(distance => ({ key: `${distance}m IM`, distance, medley: true })),
   ...['freestyle', 'breaststroke', 'backstroke', 'butterfly'].flatMap(stroke =>
     recordDistanceGroups.flatMap(group => group.distances.map(distance => ({ key: `${distance}m ${stroke}`, distance, stroke })))),
 ];
@@ -382,29 +382,30 @@ export function personalBests(activities, lengths, limit = 3) {
     if (activity.type !== 'pool') continue;
     const active = (byId.get(activity.id) ?? []).filter(l => l.active).sort((a, b) => a.sequence - b.sequence);
     for (const category of categories) {
-      if (category.stroke && category.stroke !== 'freestyle' && !active.some(l => l.stroke === category.stroke)) continue;
+      if (category.stroke && !active.some(l => l.stroke === category.stroke)) continue;
       const efforts = [];
       for (let start = 0; start < active.length; start++) {
         let distance = 0;
+        let strokeDistance = 0;
         let previousEnd = null;
         for (let end = start; end < active.length; end++) {
           const length = active[end];
           const lengthPace = divide(length.duration * 100, length.distance);
           if (!Number.isFinite(length.start) || !length.distance || !length.duration
-            || lengthPace < 30 || lengthPace > 900 || ['drill', 'mixed', 'unknown'].includes(length.stroke)
-            || !strokeOrder.includes(length.stroke) || (previousEnd != null && length.start < previousEnd - 1)) break;
-          if (category.stroke && length.stroke !== category.stroke) break;
+            || lengthPace < 30 || lengthPace > 900
+            || (previousEnd != null && length.start < previousEnd - 1)) break;
           if (category.medley) {
             const quarter = category.distance / 4;
             const stage = Math.floor((distance + 0.001) / quarter);
             if (length.stroke !== strokeOrder[stage] || distance % quarter + length.distance > quarter + 0.01) break;
           }
           distance += length.distance;
+          if (length.stroke === category.stroke) strokeDistance += length.distance;
           previousEnd = length.start + length.duration;
           if (distance > category.distance + 0.01) break;
           if (Math.abs(distance - category.distance) < 0.01) {
             const time = previousEnd - active[start].start;
-            if (time > 0) efforts.push({ start, end, time });
+            if (time > 0 && (!category.stroke || strokeDistance >= distance * 0.9)) efforts.push({ start, end, time });
             break;
           }
         }

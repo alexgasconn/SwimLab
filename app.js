@@ -620,9 +620,9 @@ function renderRecords(records) {
   const openWater = recordGroup === 'open_water';
   $('record-method').textContent = openWater
     ? 'Whole open-water activities within ±7% of the target distance, ranked by moving time. Actual distance and moving pace are shown; shorter swims within the range may rank faster. No splits are used.'
-    : 'Pool efforts use exact-distance windows of recorded FIT lengths, including rests. One best effort per session. IM requires equal butterfly / backstroke / breaststroke / freestyle legs in that order. These are locally calculated efforts, not Garmin official records.';
+    : 'Pool efforts use exact-distance windows of recorded FIT lengths, including rests. Stroke records require at least 90% of the effort distance in that stroke. One best effort per session. IM requires equal butterfly / backstroke / breaststroke / freestyle legs in that order. These are locally calculated efforts, not Garmin official records.';
   const groups = openWater ? [{ title: 'Open water', distances: openWaterRecordDistances.map(item => item.distance) }]
-    : recordGroup === 'im' ? [{ title: 'Individual medley', distances: [100, 200, 400] }] : recordDistanceGroups;
+    : recordGroup === 'im' ? [{ title: 'Individual medley', distances: [80, 100, 200, 400] }] : recordDistanceGroups;
   const distances = groups.flatMap(group => group.distances);
   const categoryKey = distance => `${distance}m ${openWater ? 'open water' : recordGroup === 'im' ? 'IM' : recordGroup}`;
   recordPaceChart($('record-pace-chart'), distances.map(distance => ({ distance, entry: records[categoryKey(distance)][0] })));

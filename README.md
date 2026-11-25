@@ -63,7 +63,7 @@ with an unknown distance remain available for data-quality review.
 - Pool / open-water, date-range and excluded-session filters affect the dashboard.
 - Configurable top 3/5/10 personal-best selector for exact-length efforts by stroke: sprint
   (40/50/80/100 m), middle distance (200/400/500 m), and long distance
-  (800/1000/1500/2000 m), plus 100/200/400 m individual medley. Results use
+  (800/1000/1500/2000 m), plus 80/100/200/400 m individual medley. Results use
   the current filtered view and recorded pool lengths only.
   Open-water records use whole activities within ±7% of 750/1000/1500/1852
   (nautical mile)/3000/5000 m, ranked by moving time. Actual distance and
@@ -187,9 +187,11 @@ These are locally calculated efforts, **not Garmin's official personal-record se
 Exact-distance, consecutive active FIT lengths are used, with time from the first
 length's start to the last length's end. **Intervening rests count.** There is no
 interpolation, estimation from session pace, or conversion of yard efforts into exact
-metre records. IM requires equal butterfly / backstroke / breaststroke / freestyle
-legs, in that order. Drills, mixed/unknown strokes, overlapping timestamps and
-implausible length times cannot qualify. Each session contributes at most one
+metre records. A stroke-specific effort requires at least 90% of its recorded
+distance in that stroke; all other lengths, including drills and mixed/unknown
+strokes, count toward the remaining distance. IM requires equal butterfly /
+backstroke / breaststroke / freestyle legs, in that order. Overlapping timestamps
+and implausible length times cannot qualify. Each session contributes at most one
 best effort per category, so overlapping windows cannot fill a podium.
 Each distance card also shows the number of valid, non-overlapping attempts in the
 current filtered view.
