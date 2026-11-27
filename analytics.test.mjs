@@ -387,6 +387,20 @@ test('80m IM requires four ordered 20m legs', () => {
   assert.equal(personalBests([swim], lengths)['80m IM'].length, 0);
 });
 
+test('160m IM requires two ordered 20m lengths per stroke', () => {
+  const swim = activity({ poolLength: 20 });
+  const lengths = ['butterfly', 'backstroke', 'breaststroke', 'freestyle']
+    .flatMap(stroke => [stroke, stroke])
+    .map((stroke, i) => ({
+      activityId: swim.id, sequence: i, active: true, distance: 20, start: i * 25, duration: 25, stroke,
+    }));
+  const records = personalBests([swim], lengths);
+  assert.equal(records['160m IM'][0].value, 200);
+  assert.equal(records.attempts['160m IM'], 1);
+  lengths[0].stroke = 'breaststroke';
+  assert.equal(personalBests([swim], lengths)['160m IM'].length, 0);
+});
+
 test('500m and 1000m records use exact lengths in a 20m pool', () => {
   const longSwim = activity({ id: 'long', poolLength: 20 });
   const lengths = Array.from({ length: 50 }, (_, i) => ({
@@ -437,7 +451,7 @@ test('every stroke has all requested distances and IM has only the requested dis
   for (const distance of [100, 200, 400]) assert.equal(imRecords[`${distance}m IM`][0].id, `im${distance}`);
   assert.deepEqual(Object.keys(records).filter(key => key !== 'attempts').sort(), [
     ...strokes.flatMap(stroke => distances.map(distance => `${distance}m ${stroke}`)),
-    '80m IM', '100m IM', '200m IM', '400m IM',
+    '80m IM', '100m IM', '160m IM', '200m IM', '400m IM',
     ...[750, 1000, 1500, 1852, 3000, 5000].map(distance => `${distance}m open water`),
   ].sort());
 });

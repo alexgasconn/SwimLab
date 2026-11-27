@@ -344,7 +344,7 @@ export const openWaterRecordDistances = [
 ];
 const openWaterKey = distance => `${distance}m open water`;
 const categories = [
-  ...[80, 100, 200, 400].map(distance => ({ key: `${distance}m IM`, distance, medley: true })),
+  ...[80, 100, 160, 200, 400].map(distance => ({ key: `${distance}m IM`, distance, medley: true })),
   ...['freestyle', 'breaststroke', 'backstroke', 'butterfly'].flatMap(stroke =>
     recordDistanceGroups.flatMap(group => group.distances.map(distance => ({ key: `${distance}m ${stroke}`, distance, stroke })))),
 ];
