@@ -154,6 +154,26 @@ export function lengthCorrelation(rows, xKey, yKey) {
     slope: xx > 0 && yy > 0 ? xy / xx : null, intercept: xx > 0 && yy > 0 ? meanY - xy / xx * meanX : null };
 }
 
+export function correlationMatrix(rows, metrics, minimumPairs = 5) {
+  const matrix = metrics.map(metric => ({
+    ...metric,
+    correlations: new Map(),
+  }));
+  for (const [rowIndex, rowMetric] of matrix.entries()) {
+    for (const [columnIndex, columnMetric] of matrix.entries()) {
+      if (rowIndex > columnIndex) {
+        rowMetric.correlations.set(columnMetric.key, matrix[columnIndex].correlations.get(rowMetric.key));
+        continue;
+      }
+      const pairs = rows.filter(row => Number.isFinite(row[rowMetric.key]) && Number.isFinite(row[columnMetric.key]));
+      const result = lengthCorrelation(pairs, rowMetric.key, columnMetric.key);
+      rowMetric.correlations.set(columnMetric.key, rowIndex === columnIndex
+        ? { n: pairs.length, r: pairs.length >= minimumPairs ? 1 : null } : result);
+    }
+  }
+  return matrix;
+}
+
 export function annotateOutliers(activities) {
   const groups = new Map(['pool', 'open_water'].map(type => {
     const logs = activities.filter(a => a.type === type && a.pace > 0).map(a => Math.log(a.pace));
@@ -255,6 +275,51 @@ export function trainingHeatmap(activities) {
     if (!Number.isNaN(date.getTime())) cells[(date.getDay() + 6) % 7][date.getHours()]++;
   }
   return cells;
+}
+
+export function trainingPatterns(activities) {
+  const weekdays = Array.from({ length: 7 }, (_, index) => ({
+    label: ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'][index],
+    sessions: 0, distanceKm: 0, movingHours: 0,
+  }));
+  const hours = Array.from({ length: 24 }, (_, index) => ({
+    label: String(index).padStart(2, '0'), sessions: 0, distanceKm: 0,
+  }));
+  const months = new Map();
+  const environments = new Map([['Piscina', 0], ['Aguas abiertas', 0]]);
+  const poolLengths = new Map();
+  for (const activity of activities) {
+    const date = localDate(activity.date);
+    const distanceKm = positive(activity.distance) ? activity.distance / 1000 : 0;
+    if (Number.isNaN(date.getTime())) continue;
+    const weekday = weekdays[(date.getDay() + 6) % 7];
+    weekday.sessions++;
+    weekday.distanceKm += distanceKm;
+    weekday.movingHours += positive(activity.movingTime) ? activity.movingTime / 3600 : 0;
+    hours[date.getHours()].sessions++;
+    hours[date.getHours()].distanceKm += distanceKm;
+    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const month = months.get(monthKey) ?? { key: monthKey, label: date.toLocaleDateString('es-ES', {
+      month: 'short', year: '2-digit',
+    }), sessions: 0, distanceKm: 0, movingHours: 0 };
+    month.sessions++;
+    month.distanceKm += distanceKm;
+    month.movingHours += positive(activity.movingTime) ? activity.movingTime / 3600 : 0;
+    months.set(monthKey, month);
+    const environment = activity.type === 'open_water' ? 'Aguas abiertas' : 'Piscina';
+    environments.set(environment, (environments.get(environment) ?? 0) + distanceKm);
+    if (activity.type === 'pool') {
+      const label = positive(activity.poolLength) ? `${activity.poolLength} m` : 'Desconocida';
+      poolLengths.set(label, (poolLengths.get(label) ?? 0) + distanceKm);
+    }
+  }
+  return {
+    weekdays, hours,
+    months: [...months.values()].sort((a, b) => a.key.localeCompare(b.key)).slice(-18),
+    environments: [...environments].map(([label, distanceKm]) => ({ label, distanceKm })),
+    poolLengths: [...poolLengths].sort(([a], [b]) => Number.parseFloat(a) - Number.parseFloat(b))
+      .map(([label, distanceKm]) => ({ label, distanceKm })),
+  };
 }
 
 export function strokeMix(activities, lengths) {
@@ -522,6 +587,12 @@ export const oceanmanPlan = [
   ['2027-05-10', 24], ['2027-05-17', 20], ['2027-05-24', 15], ['2027-05-31', 10], ['2027-06-07', 3.5],
 ].map(([week, targetKm], index) => ({ number: index + 1, week, targetKm }));
 
+export const oceanmanRace = {
+  date: '2027-06-13',
+  distanceKm: 14,
+  cutoffSeconds: 6 * 60 * 60,
+};
+
 const swimming = activities => activities.filter(a => ['pool', 'open_water'].includes(a.type)
   && positive(a.distance) && !Number.isNaN(localDate(a.date).getTime()));
 
@@ -626,13 +697,14 @@ function freestyleSessionTechnique(activities, lengths) {
   });
 }
 
-export function oceanmanReadiness(activities, asOf = new Date(), lengths = []) {
+export function oceanmanReadiness(activities, asOf = new Date(), lengths = [], windowDays = 90) {
+  windowDays = Math.max(28, Math.min(365, Number(windowDays) || 90));
   const minimumMovingRatio = 0.7;
   const meetsMovingMinimum = ratio => ratio >= minimumMovingRatio - 1e-9;
   const rows = swimming(activities).filter(a => localDate(a.date) <= asOf);
   const start = new Date(asOf);
   start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - 89);
+  start.setDate(start.getDate() - (windowDays - 1));
   const recent = rows.filter(a => localDate(a.date) >= start);
   const validTiming = a => positive(a.movingTime) && positive(a.elapsedTime)
     && a.movingTime <= a.elapsedTime;
@@ -643,9 +715,10 @@ export function oceanmanReadiness(activities, asOf = new Date(), lengths = []) {
   const continuousOpenWater = openWater.filter(a => meetsMovingMinimum(a.movingTime / a.elapsedTime));
 
   const currentMonday = monday(asOf);
-  const recentWeeks = Array.from({ length: 8 }, (_, index) => {
+  const weekCount = Math.max(4, Math.floor(windowDays / 7));
+  const recentWeeks = Array.from({ length: weekCount }, (_, index) => {
     const start = new Date(currentMonday);
-    start.setDate(start.getDate() - (8 - index) * 7);
+    start.setDate(start.getDate() - (weekCount - index) * 7);
     const end = new Date(start);
     end.setDate(end.getDate() + 7);
     return rows.filter(a => {
@@ -654,8 +727,13 @@ export function oceanmanReadiness(activities, asOf = new Date(), lengths = []) {
     });
   });
   const weeklyAverage = recentWeeks.reduce((sum, week) =>
-    sum + week.reduce((total, a) => total + a.distance / 1000, 0), 0) / 8;
+    sum + week.reduce((total, a) => total + a.distance / 1000, 0), 0) / weekCount;
+  const eightWeekDistance = recentWeeks.flat().reduce((sum, a) => sum + a.distance, 0);
+  const eightWeekOpenWater = recentWeeks.flat().filter(a => a.type === 'open_water')
+    .reduce((sum, a) => sum + a.distance, 0);
+  const openWaterShare = divide(eightWeekOpenWater * 100, eightWeekDistance);
   const consistentWeeks = recentWeeks.filter(week => week.length >= 3).length;
+  const consistentTarget = Math.ceil(weekCount * 0.75);
   const continuityRatios = longSessions.map(a => a.movingTime / a.elapsedTime);
   const continuity = continuityRatios.length >= 3 ? median(continuityRatios) : null;
   const techniqueSessions = freestyleSessionTechnique(recent, lengths)
@@ -680,11 +758,11 @@ export function oceanmanReadiness(activities, asOf = new Date(), lengths = []) {
     : paceStable && dpsStable ? 100 : boundedPercent(100 - Math.max(0, paceFade - 5, dpsLoss - 5) * 10);
   const definitions = [
     {
-      id: 'long-session', title: 'Tirada larga reciente', weight: 15,
+      id: 'long-session', title: 'Tirada larga reciente', weight: 10,
       value: hasHistory ? maxSessionKm : null, display: hasHistory ? `${number(maxSessionKm, 2)} km` : '--',
       progress: hasHistory ? boundedPercent(maxSessionKm / 5 * 100) : null,
       complete: maxSessionKm >= 5, available: longSessions.length > 0,
-      base: `${qualifiedLongSessions.length} de ${longSessions.length} sesiones ≥1,5 km con ≥70% en movimiento en los últimos 90 días. Piscina y OW; todos los estilos.`,
+      base: `${qualifiedLongSessions.length} de ${longSessions.length} sesiones ≥1,5 km con ≥70% en movimiento en los últimos ${windowDays} días. Piscina y OW; todos los estilos.`,
       description: 'Mayor distancia registrada en una sesión reciente con ≥70% en movimiento/total. Objetivo: 5 km. Admite series y descansos; no prueba nado continuo ni predice el tiempo de 14 km. La resistencia OW sigue teniendo su propio objetivo de 10 km.',
       milestones: [2, 3, 5].map(km => ({ label: `${km} km en una sesión con ≥70% en movimiento`, done: maxSessionKm >= km })),
     },
@@ -693,47 +771,61 @@ export function oceanmanReadiness(activities, asOf = new Date(), lengths = []) {
       value: hasHistory ? maxOpenWaterKm : null, display: hasHistory ? `${number(maxOpenWaterKm, 2)} km` : '--',
       progress: hasHistory ? boundedPercent(maxOpenWaterKm / 10 * 100) : null,
       complete: maxOpenWaterKm >= 10, available: openWater.length > 0,
-      base: `${continuousOpenWater.length} sesiones OW ≥2 km con ≥70% en movimiento en los últimos 90 días; ${openWater.length} con tiempos válidos.`,
+      base: `${continuousOpenWater.length} sesiones OW ≥2 km con ≥70% en movimiento en los últimos ${windowDays} días; ${openWater.length} con tiempos válidos.`,
       description: 'Mayor distancia OW reciente con al menos 70% en movimiento/total. Admite hasta un 30% de tiempo no móvil registrado; no demuestra nado sin parar. Las sesiones por debajo del mínimo o sin tiempos válidos no acreditan esta distancia.',
       milestones: [5, 8, 10].map(km => ({ label: `${km} km con ≥70% en movimiento`, done: maxOpenWaterKm >= km })),
     },
     {
-      id: 'weekly-volume', title: 'Volumen semanal sostenido', weight: 25,
+      id: 'weekly-volume', title: 'Volumen semanal sostenido', weight: 20,
       value: hasHistory ? weeklyAverage : null, display: hasHistory ? `${number(weeklyAverage)} km/sem` : '--',
       progress: hasHistory ? boundedPercent(weeklyAverage / 20 * 100) : null,
       complete: weeklyAverage >= 20, available: hasHistory,
-      base: 'Media de las 8 últimas semanas completas, de lunes a domingo. Las semanas sin datos registrados cuentan como cero.',
+      base: `Media de las ${weekCount} últimas semanas completas, de lunes a domingo. Las semanas sin datos registrados cuentan como cero.`,
       description: 'Objetivo final: 20 km/semana sostenidos, no el cumplimiento del objetivo de esta fase del plan. Todos los estilos contribuyen al volumen. Un pico aislado no sustituye ocho semanas de base; el historial incompleto puede infravalorar la carga.',
       milestones: [10, 15, 20].map(km => ({ label: `${km} km/semana`, done: weeklyAverage >= km })),
     },
     {
-      id: 'continuity', title: 'Continuidad de sesión', weight: 15,
+      id: 'continuity', title: 'Continuidad de sesión', weight: 5,
       value: continuity, display: continuity == null ? '--' : `${number(continuity * 100)}%`,
       progress: continuity == null ? null : meetsMovingMinimum(continuity) ? 100
         : boundedPercent((continuity - 0.5) / (minimumMovingRatio - 0.5) * 100),
       complete: continuity != null && meetsMovingMinimum(continuity), available: continuity != null,
-      base: `${continuityRatios.length} sesiones completas ≥1,5 km en 90 días, piscina y OW. Requiere ≥3 con tiempos válidos; mediana de movimiento/total.`,
+      base: `${continuityRatios.length} sesiones completas ≥1,5 km en ${windowDays} días, piscina y OW. Requiere ≥3 con tiempos válidos; mediana de movimiento/total.`,
       description: 'Continuidad de sesión, incluidos descansos entre series y todos los estilos. Objetivo ≥70% de mediana en movimiento/total; 50% o menos no suma puntos. No certifica nado continuo ni preparación clínica.',
       milestones: [{ label: '60% del tiempo nadando', done: continuity != null && continuity >= 0.6 - 1e-9 },
         { label: '70% del tiempo nadando', done: continuity != null && meetsMovingMinimum(continuity) }],
     },
     {
-      id: 'consistency', title: 'Constancia', weight: 10,
-      value: hasHistory ? consistentWeeks : null, display: hasHistory ? `${consistentWeeks} / 8 semanas` : '--',
-      progress: hasHistory ? boundedPercent(consistentWeeks / 6 * 100) : null,
-      complete: consistentWeeks >= 6, available: hasHistory,
-      base: `${consistentWeeks} de las 8 últimas semanas completas con ≥3 sesiones registradas.`,
-      description: 'Objetivo: 6 de 8 semanas con tres o más sesiones. La semana actual no se cuenta; los días sin registros no se inventan.',
-      milestones: [4, 6].map(weeks => ({ label: `${weeks} de 8 semanas`, done: consistentWeeks >= weeks })),
+      id: 'consistency', title: 'Constancia', weight: 5,
+      value: hasHistory ? consistentWeeks : null, display: hasHistory ? `${consistentWeeks} / ${weekCount} semanas` : '--',
+      progress: hasHistory ? boundedPercent(consistentWeeks / consistentTarget * 100) : null,
+      complete: consistentWeeks >= consistentTarget, available: hasHistory,
+      base: `${consistentWeeks} de las ${weekCount} últimas semanas completas con ≥3 sesiones registradas.`,
+      description: `Objetivo: ${consistentTarget} de ${weekCount} semanas (75%) con tres o más sesiones. La semana actual no se cuenta; los días sin registros no se inventan.`,
+      milestones: [Math.ceil(weekCount / 2), consistentTarget].map(weeks => ({
+        label: `${weeks} de ${weekCount} semanas`, done: consistentWeeks >= weeks,
+      })),
     },
     {
-      id: 'technique', title: 'Estabilidad del crol en sesión (FIT)', weight: 10,
+      id: 'specificity', title: 'Especificidad en aguas abiertas', weight: 30,
+      value: openWaterShare, display: openWaterShare == null ? '--' : `${number(openWaterShare)}%`,
+      progress: openWaterShare == null ? null : boundedPercent(openWaterShare / 35 * 100),
+      complete: openWaterShare != null && openWaterShare >= 35,
+      available: openWaterShare != null,
+      base: `${number(eightWeekOpenWater / 1000)} km OW de ${number(eightWeekDistance / 1000)} km totales en las ${weekCount} últimas semanas completas. La ausencia de OW puntúa 0%; aquí no se interpreta como dato faltante.`,
+      description: `Mide qué parte del volumen de ${weekCount} semanas se realiza en el entorno de carrera. Es independiente de la mayor tirada OW y del volumen total: una persona puede acumular muchos km en piscina y seguir teniendo baja especificidad. Objetivo ≥35% del volumen en aguas abiertas.`,
+      milestones: [15, 25, 35].map(share => ({
+        label: `${share}% del volumen reciente en OW`, done: openWaterShare != null && openWaterShare >= share,
+      })),
+    },
+    {
+      id: 'technique', title: 'Estabilidad del crol en sesión (FIT)', weight: 5,
       value: techniqueAvailable ? Math.max(paceFade, dpsLoss) : null,
       display: techniqueAvailable ? `Ritmo ${number(paceFade)}% · DPS ${number(-dpsLoss || 0)}%` : '--',
       progress: techniqueProgress, complete: paceStable && dpsStable,
       available: techniqueAvailable,
       base: techniqueAvailable ? `${techniqueSessions.length} sesiones con ≥400 m y ≥16 largos válidos de crol: primer vs último cuarto. Mediana de cambios por sesión. Evidencia por longitud de piscina: ${techniqueSummary}.` :
-        `${techniqueSessions.length} sesiones elegibles en 90 días; requiere ≥3 con ≥400 m y ≥16 largos de crol del tamaño de piscina, tiempos válidos y strokes positivos. Sin datos no se estima a partir de promedios de sesión.`,
+        `${techniqueSessions.length} sesiones elegibles en ${windowDays} días; requiere ≥3 con ≥400 m y ≥16 largos de crol del tamaño de piscina, tiempos válidos y strokes positivos. Sin datos no se estima a partir de promedios de sesión.`,
       description: 'Últimas cinco sesiones elegibles; compara largos de crol del mismo tamaño, aunque haya series, pausas y otros estilos entre ellos. Objetivo: ralentización ≤5% y pérdida de DPS ≤5%. Puntúa el peor deterioro (100% hasta 5%, 0% a 15%); SPL, LPM y SWOLF son apoyo sin duplicar puntos. Intensidad, calentamiento, virajes y descansos influyen: describe estabilidad de sesión, no fatiga en nado continuo.',
       milestones: [{ label: 'Ralentización ≤5%', done: paceStable },
         { label: 'Pérdida de DPS ≤5%', done: dpsStable }],
@@ -747,12 +839,13 @@ export function oceanmanReadiness(activities, asOf = new Date(), lengths = []) {
   const score = hasHistory ? definitions.reduce((sum, check) => sum + check.weight * (check.progress ?? 0) / 100, 0) : null;
   return {
     score, evidenceWeight, completed: definitions.filter(check => check.status === 'completed').length,
-    checks: definitions,
+    checks: definitions, windowDays, weekCount,
     technique: { samples: techniqueSessions.length, paceFade, dpsLoss, sessions: techniqueSessions },
+    specificity: { openWaterShare, openWaterKm: eightWeekOpenWater / 1000, totalKm: eightWeekDistance / 1000 },
   };
 }
 
-export function oceanmanReadinessHistory(activities, asOf = new Date(), lengths = []) {
+export function oceanmanReadinessHistory(activities, asOf = new Date(), lengths = [], windowDays = 90) {
   const rows = swimming(activities).filter(a => localDate(a.date) <= asOf);
   const dates = [...new Set(rows.map(a => dateKey(localDate(a.date))))].sort();
   if (!dates.length) return [];
@@ -760,9 +853,81 @@ export function oceanmanReadinessHistory(activities, asOf = new Date(), lengths 
   if (dates.at(-1) !== latest) dates.push(latest);
   return dates.map(date => {
     const end = new Date(Math.min(localDate(`${date}T23:59:59.999`).getTime(), asOf.getTime()));
-    const readiness = oceanmanReadiness(rows, end, lengths);
+    const readiness = oceanmanReadiness(rows, end, lengths, windowDays);
     return { date, score: readiness.score, evidenceWeight: readiness.evidenceWeight };
   });
+}
+
+export function oceanmanDashboard(activities, asOf = new Date(), lengths = [], windowDays = 90) {
+  const rows = swimming(activities).filter(a => localDate(a.date) <= asOf);
+  const now = localDate(`${dateKey(asOf)}T23:59:59.999`);
+  const since = days => {
+    const date = new Date(now);
+    date.setDate(date.getDate() - days + 1);
+    date.setHours(0, 0, 0, 0);
+    return rows.filter(a => localDate(a.date) >= date);
+  };
+  const distanceKm = list => list.reduce((sum, a) => sum + a.distance / 1000, 0);
+  const last7 = since(7);
+  const last28 = since(28);
+  const previous7Start = new Date(now);
+  previous7Start.setDate(previous7Start.getDate() - 13);
+  previous7Start.setHours(0, 0, 0, 0);
+  const previous7End = new Date(now);
+  previous7End.setDate(previous7End.getDate() - 6);
+  previous7End.setHours(23, 59, 59, 999);
+  const previous7 = rows.filter(a => localDate(a.date) >= previous7Start && localDate(a.date) <= previous7End);
+  const recent90Start = new Date(now);
+  recent90Start.setDate(recent90Start.getDate() - 89);
+  recent90Start.setHours(0, 0, 0, 0);
+  const recentOpenWater = rows.filter(a => a.type === 'open_water' && a.distance >= 1000
+    && positive(a.movingTime) && localDate(a.date) >= recent90Start);
+  const openWaterDistance = recentOpenWater.reduce((sum, a) => sum + a.distance, 0);
+  const openWaterPace = divide(recentOpenWater.reduce((sum, a) => sum + a.movingTime * 100, 0), openWaterDistance);
+  const raceDate = localDate(`${oceanmanRace.date}T00:00:00`);
+  const daysToRace = Math.max(0, Math.ceil((raceDate - now) / 86400000));
+  const thisMonday = monday(now);
+  const nextMonday = new Date(thisMonday);
+  nextMonday.setDate(nextMonday.getDate() + 7);
+  const currentWeek = rows.filter(a => {
+    const date = localDate(a.date);
+    return date >= thisMonday && date < nextMonday;
+  });
+  const plan = oceanmanPlanRows(rows, now);
+  const currentPlan = plan.find(row => row.week === dateKey(thisMonday))
+    ?? plan.find(row => localDate(`${row.week}T00:00:00`) > thisMonday)
+    ?? null;
+  const previousReadinessDate = new Date(now);
+  previousReadinessDate.setDate(previousReadinessDate.getDate() - 28);
+  const currentReadiness = oceanmanReadiness(rows, now, lengths, windowDays);
+  const previousReadiness = oceanmanReadiness(rows, previousReadinessDate, lengths, windowDays);
+  const last7Km = distanceKm(last7);
+  const last28Km = distanceKm(last28);
+  const previous7Km = distanceKm(previous7);
+  const openWater28Km = distanceKm(last28.filter(a => a.type === 'open_water'));
+  const cutoffPace = oceanmanRace.cutoffSeconds * 100 / (oceanmanRace.distanceKm * 1000);
+  const planProgress = currentPlan?.targetKm > 0 ? boundedPercent(distanceKm(currentWeek) / currentPlan.targetKm * 100) : null;
+  return {
+    race: { ...oceanmanRace, daysToRace, cutoffPace },
+    readiness: currentReadiness,
+    readinessDelta: currentReadiness.score != null && previousReadiness.score != null
+      ? currentReadiness.score - previousReadiness.score : null,
+    currentPlan,
+    week: { actualKm: distanceKm(currentWeek), targetKm: currentPlan?.targetKm ?? null,
+      remainingKm: currentPlan ? Math.max(0, currentPlan.targetKm - distanceKm(currentWeek)) : null,
+      progress: planProgress, sessions: currentWeek.length },
+    load: {
+      last7Km, previous7Km, last28Km, ratio: last28Km > 0 ? last7Km / (last28Km / 4) : null,
+      sessions: last28.length, openWater28Km, openWaterShare: last28Km > 0 ? openWater28Km / last28Km * 100 : null,
+      deltaPercent: previous7Km > 0 ? (last7Km / previous7Km - 1) * 100 : null,
+    },
+    openWater: {
+      pace: openWaterPace, cutoffPace,
+      paceMargin: openWaterPace == null ? null : cutoffPace - openWaterPace,
+      sessions: recentOpenWater.length, distanceKm: openWaterDistance / 1000,
+    },
+    lastSession: rows.length ? [...rows].sort((a, b) => localDate(b.date) - localDate(a.date))[0] : null,
+  };
 }
 
 function mean(values) {

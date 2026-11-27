@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activityAnalysis, lengthTrend, lengthCorrelation, metricRating, strokeSummary } from './analytics.mjs';
+import { activityAnalysis, lengthTrend, lengthCorrelation, correlationMatrix, metricRating, strokeSummary } from './analytics.mjs';
 
 test('conditional metric ratings reverse direction and skip missing or constant values', () => {
   assert.deepEqual([0, 5, 10].map(value => metricRating(value, 0, 10, 'higher')), ['poor', 'medium', 'good']);
@@ -149,7 +149,21 @@ test('length trends require eight measured values and correlations require five 
   assert.equal(lengthCorrelation(rows.slice(0, 4), 'dps', 'pace').r, null);
   assert.equal(lengthCorrelation(rows.map(r => ({ ...r, dps: 2 })), 'dps', 'pace').r, null);
 });
-import { deriveMetrics, localDate, annotateOutliers, histogram, weeklyTrend, trainingHeatmap, personalBests, personalBestHistory, sessionRankings, swolfTrend, trainingSummary, strokeMix, sortSessions, filterLogbook, oceanmanPlan, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory } from './analytics.mjs';
+
+test('correlation matrices are symmetric and preserve missing sample coverage', () => {
+  const rows = Array.from({ length: 6 }, (_, index) => ({
+    pace: 120 + index, dps: 2 - index * 0.1, swolf: 40 + index * 2,
+  }));
+  const matrix = correlationMatrix([...rows, { pace: 100, dps: null, swolf: 35 }], [
+    { key: 'pace', label: 'Ritmo' }, { key: 'dps', label: 'DPS' }, { key: 'swolf', label: 'SWOLF' },
+  ]);
+  assert.equal(matrix[0].correlations.get('dps').r, matrix[1].correlations.get('pace').r);
+  assert.equal(matrix[0].correlations.get('dps').n, 6);
+  assert.ok(matrix[0].correlations.get('dps').r < -0.99);
+  assert.equal(matrix[2].correlations.get('pace').n, 7);
+  assert.equal(matrix[2].correlations.get('swolf').r, 1);
+});
+import { deriveMetrics, localDate, annotateOutliers, histogram, weeklyTrend, trainingHeatmap, trainingPatterns, personalBests, personalBestHistory, sessionRankings, swolfTrend, trainingSummary, strokeMix, sortSessions, filterLogbook, oceanmanPlan, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory, oceanmanDashboard, oceanmanRace } from './analytics.mjs';
 
 const activity = overrides => deriveMetrics({
   id: '1', name: 'Swim', date: '2026-10-12T08:30:00', type: 'pool', distance: 1000,
@@ -193,6 +207,22 @@ test('weekly mean includes zero weeks and heatmap uses local weekday and hour', 
   assert.equal(cells[0][8], 1);
   assert.equal(cells[0][18], 1);
   assert.equal(cells.flat().reduce((s, count) => s + count, 0), 2);
+});
+
+test('training patterns aggregate local weekdays, hours, months, environments and pool lengths', () => {
+  const patterns = trainingPatterns([
+    activity({ id: 'mon', date: '2026-11-02T07:15:00', distance: 2000, movingTime: 3600,
+      type: 'pool', poolLength: 25 }),
+    activity({ id: 'sun', date: '2026-11-01T18:00:00', distance: 3000, movingTime: 7200,
+      type: 'open_water', poolLength: null }),
+  ]);
+  assert.deepEqual(patterns.weekdays.map(row => row.sessions), [1, 0, 0, 0, 0, 0, 1]);
+  assert.equal(patterns.hours[7].sessions, 1);
+  assert.equal(patterns.hours[18].distanceKm, 3);
+  assert.equal(patterns.months[0].distanceKm, 5);
+  assert.deepEqual(patterns.environments.map(row => row.distanceKm), [2, 3]);
+  assert.equal(patterns.poolLengths[0].label, '25 m');
+  assert.equal(patterns.poolLengths[0].distanceKm, 2);
 });
 
 test('weekly technique ignores missing measurements and open water; swim index uses speed times DPS', () => {
@@ -638,6 +668,25 @@ test('rolling Oceanman volumes use inclusive local calendar days and declared ta
 });
 
 const oceanmanDate = new Date('2026-11-13T23:59:59');
+test('Oceanman dashboard summarizes week plan, training load and race pace margin', () => {
+  const rows = [
+    activity({ id: 'week-1', date: '2026-11-13T08:00:00', distance: 4000 }),
+    activity({ id: 'week-2', date: '2026-11-11T08:00:00', distance: 3000 }),
+    activity({ id: 'prior-week', date: '2026-11-06T08:00:00', distance: 2000 }),
+    activity({ id: 'ow', date: '2026-11-01T08:00:00', type: 'open_water',
+      distance: 5000, movingTime: 7000, elapsedTime: 7500 }),
+  ];
+  const dashboard = oceanmanDashboard(rows, oceanmanDate);
+  assert.equal(dashboard.week.actualKm, 7);
+  assert.equal(dashboard.week.targetKm, 10);
+  assert.equal(dashboard.load.last7Km, 7);
+  assert.equal(dashboard.load.previous7Km, 7);
+  assert.equal(dashboard.race.cutoffPace, oceanmanRace.cutoffSeconds * 100 / 14000);
+  assert.equal(dashboard.openWater.sessions, 1);
+  assert.ok(dashboard.openWater.paceMargin > 0);
+  assert.equal(dashboard.lastSession.id, 'week-1');
+});
+
 function freestyleEvidence(id, { date = '2026-11-01T08:00:00', distance = 2000, pace = 120,
   endPace = pace, endStrokes = 12, poolLength = 25 } = {}) {
   const count = distance / poolLength;
@@ -684,6 +733,48 @@ test('Garmin readiness keeps missing FIT evidence pending without redistributing
   assert.equal(readiness.checks.find(check => check.id === 'long-session').progress, 40);
   assert.equal(readiness.evidenceWeight, 75);
   assert.ok(readiness.score <= readiness.evidenceWeight);
+});
+
+test('Oceanman specificity rewards open-water share independently from endurance and total volume', () => {
+  const baseDate = '2026-10-26T08:00:00';
+  const poolOnly = [
+    activity({ id: 'pool', date: baseDate, distance: 10000, type: 'pool',
+      movingTime: 12000, elapsedTime: 13000 }),
+  ];
+  const poolResult = oceanmanReadiness(poolOnly, oceanmanDate);
+  const poolCheck = poolResult.checks.find(check => check.id === 'specificity');
+  assert.equal(poolCheck.available, true);
+  assert.equal(poolCheck.progress, 0);
+  assert.equal(poolCheck.value, 0);
+
+  const mixed = [
+    ...poolOnly,
+    activity({ id: 'ow', date: '2026-10-27T08:00:00', distance: 3500, type: 'open_water',
+      movingTime: 5000, elapsedTime: 5500 }),
+  ];
+  const mixedResult = oceanmanReadiness(mixed, oceanmanDate);
+  const check = mixedResult.checks.find(item => item.id === 'specificity');
+  assert.ok(Math.abs(check.value - 25.9259) < 0.001);
+  assert.equal(check.complete, false);
+  assert.ok(check.progress > 70);
+  assert.equal(mixedResult.specificity.openWaterKm, 3.5);
+  assert.equal(mixedResult.checks.reduce((sum, item) => sum + item.weight, 0), 100);
+});
+
+test('Oceanman checks expire evidence outside the selected time window', () => {
+  const rows = [
+    activity({ id: 'old-ow', date: '2026-04-01T08:00:00', distance: 10000, type: 'open_water',
+      movingTime: 12000, elapsedTime: 13000 }),
+    activity({ id: 'recent-pool', date: '2026-11-01T08:00:00', distance: 2000, type: 'pool',
+      movingTime: 2400, elapsedTime: 2600 }),
+  ];
+  const strict = oceanmanReadiness(rows, oceanmanDate, [], 56);
+  const broad = oceanmanReadiness(rows, oceanmanDate, [], 365);
+  assert.equal(strict.checks.find(check => check.id === 'open-water').available, false);
+  assert.equal(strict.checks.find(check => check.id === 'open-water').value, 0);
+  assert.equal(broad.checks.find(check => check.id === 'open-water').complete, true);
+  assert.equal(strict.windowDays, 56);
+  assert.equal(strict.weekCount, 8);
 });
 
 test('Oceanman accepts 70% moving time inclusively and scales continuity from 50% to 70%', () => {
@@ -788,7 +879,7 @@ test('Garmin readiness history recalculates past FIT evidence without using late
   const history = oceanmanReadinessHistory(rows, oceanmanDate, lengths);
   assert.equal(history.at(-1).date, '2026-11-13');
   assert.ok(history.every((point, index) => !index || history[index - 1].date < point.date));
-  assert.equal(history[0].evidenceWeight, 50);
+  assert.equal(history[0].evidenceWeight, 35);
   assert.equal(history[2].evidenceWeight, 75);
   for (const point of history) {
     const asOf = new Date(`${point.date}T23:59:59`);
@@ -798,5 +889,5 @@ test('Garmin readiness history recalculates past FIT evidence without using late
   }
   const morning = new Date('2026-11-03T07:00:00');
   assert.equal(oceanmanReadiness(rows, morning, lengths).technique.samples, 2);
-  assert.equal(oceanmanReadinessHistory(rows, morning, lengths).at(-1).evidenceWeight, 50);
+  assert.equal(oceanmanReadinessHistory(rows, morning, lengths).at(-1).evidenceWeight, 65);
 });

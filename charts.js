@@ -57,7 +57,7 @@ export const strokeNames = { freestyle: 'Freestyle', backstroke: 'Backstroke', b
 
 export function metricChart(container, rows, options) {
   const { xKey = 'index', yKey, xLabel = 'Active length', yLabel, format = number, xFormat = number,
-    scatter = false, maxGap = Infinity, regression = null, color = colors.pool } = options;
+    scatter = false, maxGap = Infinity, regression = null, color = colors.pool, rollingWindow = 0 } = options;
   const valid = rows.filter(r => Number.isFinite(r[xKey]) && Number.isFinite(r[yKey]));
   const svg = chart(container, `${yLabel} versus ${xLabel}. ${valid.length} recorded values.`, !valid.length);
   if (!svg) return;
@@ -85,6 +85,15 @@ export function metricChart(container, rows, options) {
   if (regression?.slope != null) {
     const points = [xMin, xMax].map(v => `${x(v)},${y(regression.slope * v + regression.intercept)}`).join(' ');
     svg.append(element('polyline', { points, fill: 'none', stroke: colors.rolling, 'stroke-width': 2, 'stroke-dasharray': '6 5' }));
+  }
+  if (rollingWindow >= 2 && valid.length >= rollingWindow) {
+    const moving = valid.map((row, index) => {
+      const sample = valid.slice(Math.max(0, index - rollingWindow + 1), index + 1);
+      return sample.reduce((sum, item) => sum + item[yKey], 0) / sample.length;
+    });
+    const meanPoints = moving.map((value, index) => `${x(valid[index][xKey])},${y(value)}`);
+    svg.append(element('polyline', { points: meanPoints.join(' '), fill: 'none', stroke: colors.rolling,
+      'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
   }
   const stride = scatter ? 1 : Math.max(1, Math.ceil(valid.length / 250));
   for (let i = 0; i < valid.length; i += stride) {
@@ -216,18 +225,19 @@ export function scatterplot(container, activities) {
   }
 }
 
-export function distribution(container, values, isPace) {
+export function distribution(container, values, isPace, options = {}) {
   const bins = histogram(values);
-  const svg = chart(container, isPace ? 'Distribution of session moving pace' : 'Distribution of session distance', !bins.length);
+  const label = options.label ?? (isPace ? 'Distribution of session moving pace' : 'Distribution of session distance');
+  const svg = chart(container, label, !bins.length);
   if (!svg) return;
-  const format = isPace ? paceLabel : number;
+  const format = options.format ?? (isPace ? paceLabel : number);
   const ymax = Math.max(4, Math.ceil(Math.max(...bins.map(b => b.count)) / 4) * 4);
   const { x, y } = axes(svg, bins[0].from, bins.at(-1).to, ymax,
-    isPace ? 'Moving pace (min:sec /100 m)' : 'Distance (km)', 'Sessions', format);
+    options.xLabel ?? (isPace ? 'Moving pace (min:sec /100 m)' : 'Distance (km)'), 'Sessions', format);
   for (const bin of bins) {
     const bar = element('rect', {
       x: x(bin.from) + 2, y: y(bin.count), width: Math.max(1, x(bin.to) - x(bin.from) - 4),
-      height: y(0) - y(bin.count), rx: 4, fill: isPace ? colors.open_water : colors.pool,
+      height: y(0) - y(bin.count), rx: 4, fill: options.color ?? (isPace ? colors.open_water : colors.pool),
     });
     tooltip(bar, `${format(bin.from)} - ${format(bin.to)}: ${bin.count} sessions`);
     svg.append(bar);
@@ -288,6 +298,168 @@ export function swolfChart(container, activities) {
     link.append(dot);
     svg.append(link);
   }
+}
+
+export function sessionMetricChart(container, rows, { label, yLabel = label, format = number, color = colors.pool,
+  lowerIsBetter = false, rollingWindow = 5, area = false } = {}) {
+  const valid = rows.filter(row => Number.isFinite(row.value) && !Number.isNaN(localDate(row.date).getTime()))
+    .sort((a, b) => localDate(a.date) - localDate(b.date));
+  const svg = chart(container, `${label} por sesión a lo largo del tiempo.`, !valid.length);
+  if (!svg) return;
+  const dates = valid.map(row => localDate(row.date).getTime());
+  const values = valid.map(row => row.value);
+  let min = Math.min(...values), max = Math.max(...values);
+  const padding = (max - min || Math.abs(max) || 1) * 0.12;
+  min = Math.max(0, min - padding); max += padding;
+  const datePadding = dates[0] === dates.at(-1) ? 86400000 : 0;
+  const { x, y } = axes(svg, dates[0] - datePadding, dates.at(-1) + datePadding, max, 'Fecha de sesión', yLabel,
+    value => new Date(value).toLocaleDateString('es-ES', { month: 'short', year: '2-digit' }), format, min);
+  const points = valid.map((row, index) => `${x(dates[index])},${y(row.value)}`);
+  if (area && points.length > 1) svg.append(element('polygon', {
+    points: `${points.join(' ')} ${x(dates.at(-1))},${y(min)} ${x(dates[0])},${y(min)}`,
+    fill: color, 'fill-opacity': .1,
+  }));
+  if (points.length > 1) svg.append(element('polyline', {
+    points: points.join(' '), fill: 'none', stroke: color, 'stroke-width': 1.8, opacity: .72,
+  }));
+  const moving = valid.map((row, index) => {
+    const sample = valid.slice(Math.max(0, index - rollingWindow + 1), index + 1);
+    return sample.reduce((sum, item) => sum + item.value, 0) / sample.length;
+  });
+  if (valid.length >= 2) svg.append(element('polyline', {
+    points: moving.map((value, index) => `${x(dates[index])},${y(value)}`).join(' '),
+    fill: 'none', stroke: colors.rolling, 'stroke-width': 2.5,
+  }));
+  for (const [index, row] of valid.entries()) {
+    const dot = element('circle', { cx: x(dates[index]), cy: y(row.value), r: 3.5,
+      fill: row.environment === 'open_water' ? colors.open_water : color, class: 'data-point' });
+    const detail = `${row.date?.slice(0, 10)} · ${row.name ?? 'Sesión'}: ${format(row.value)}${lowerIsBetter ? ' · menor es mejor' : ''}`;
+    tooltip(dot, detail);
+    if (row.id) {
+      const link = element('a', { href: `#activity=${encodeURIComponent(row.id)}`, 'aria-label': detail });
+      link.append(dot);
+      svg.append(link);
+    } else svg.append(dot);
+  }
+}
+
+export function categoryBarChart(container, rows, { label, yLabel = label, format = number,
+  color = colors.pool, maxBars = 24, horizontal = false } = {}) {
+  const valid = rows.filter(row => row.label != null && Number.isFinite(row.value)).slice(-maxBars);
+  const svg = chart(container, `${label} agrupado por categoría.`, !valid.length);
+  if (!svg) return;
+  if (horizontal) {
+    svg.setAttribute('viewBox', '0 0 640 300');
+    const left = 105, right = 18, top = 15, bottom = 20;
+    const max = Math.max(...valid.map(row => row.value), 1);
+    const rowHeight = (300 - top - bottom) / valid.length;
+    for (const [index, row] of valid.entries()) {
+      const y = top + index * rowHeight + rowHeight / 2;
+      const width = (640 - left - right) * row.value / max;
+      svg.append(element('text', { x: left - 10, y: y + 4, 'text-anchor': 'end', class: 'axis-text' }, row.label));
+      const bar = element('rect', { x: left, y: y - rowHeight * .32, width, height: rowHeight * .64, rx: 4,
+        fill: row.color ?? color });
+      tooltip(bar, `${row.label}: ${format(row.value)} ${yLabel}`);
+      svg.append(bar);
+    }
+    return;
+  }
+  const max = Math.max(...valid.map(row => row.value), 1);
+  const { x, y } = axes(svg, -0.5, valid.length - 0.5, max * 1.12, '', yLabel, () => '', format);
+  const width = plotW / Math.max(1, valid.length) * .68;
+  for (const [index, row] of valid.entries()) {
+    const bar = element('rect', { x: x(index) - width / 2, y: y(row.value), width,
+      height: Math.max(0, y(0) - y(row.value)), rx: 3, fill: row.color ?? color, opacity: .9 });
+    tooltip(bar, `${row.label}: ${format(row.value)} ${yLabel}`);
+    svg.append(bar);
+    svg.append(element('text', { x: x(index), y: H - margin.bottom + 18, 'text-anchor': 'middle',
+      class: 'axis-text', transform: valid.length > 12 ? `rotate(-40 ${x(index)} ${H - margin.bottom + 18})` : '' }, row.label));
+  }
+}
+
+export function correlationMatrixChart(container, matrix, label = 'Matriz de correlaciones') {
+  container.replaceChildren();
+  if (!matrix.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = 'No hay métricas suficientes para calcular correlaciones.';
+    container.append(empty);
+    return;
+  }
+  const wrap = document.createElement('div');
+  wrap.className = 'correlation-table-wrap';
+  wrap.tabIndex = 0;
+  wrap.setAttribute('aria-label', `${label}. Desplázate horizontal y verticalmente para ver todas las métricas.`);
+  const table = document.createElement('table');
+  table.className = 'correlation-table';
+  const head = document.createElement('thead'), header = document.createElement('tr');
+  const corner = document.createElement('th');
+  corner.scope = 'col'; corner.textContent = 'Métrica';
+  header.append(corner);
+  for (const metric of matrix) {
+    const th = document.createElement('th');
+    th.scope = 'col'; th.textContent = metric.shortLabel ?? metric.label;
+    th.title = metric.label; header.append(th);
+  }
+  head.append(header);
+  const body = document.createElement('tbody');
+  for (const rowMetric of matrix) {
+    const row = document.createElement('tr');
+    const rowHeader = document.createElement('th');
+    rowHeader.scope = 'row'; rowHeader.textContent = rowMetric.shortLabel ?? rowMetric.label;
+    rowHeader.title = rowMetric.label; row.append(rowHeader);
+    for (const columnMetric of matrix) {
+      const result = rowMetric.correlations.get(columnMetric.key);
+      const cell = document.createElement('td');
+      const value = result?.r;
+      cell.textContent = value == null ? '—' : value.toFixed(2);
+      if (value != null && rowMetric.key !== columnMetric.key) {
+        const strength = Math.abs(value);
+        cell.className = value > 0 ? 'correlation-positive' : 'correlation-negative';
+        cell.style.setProperty('--correlation-strength', String(Math.min(1, strength)));
+        cell.dataset.strength = strength >= .7 ? 'strong' : strength >= .4 ? 'medium' : 'weak';
+        cell.title = `${rowMetric.label} ↔ ${columnMetric.label}: r=${value.toFixed(3)}, n=${result.n}. Descriptivo, no causal.`;
+        cell.setAttribute('aria-label', cell.title);
+      } else if (rowMetric.key === columnMetric.key) {
+        cell.className = 'correlation-diagonal';
+        cell.title = `${rowMetric.label}: diagonal, n=${result?.n ?? 0}`;
+      } else {
+        cell.title = `${rowMetric.label} ↔ ${columnMetric.label}: no evaluable (menos de 5 pares o sin variación)`;
+      }
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(head, body);
+  wrap.append(table);
+  const insights = [];
+  for (let row = 0; row < matrix.length; row++) {
+    for (let column = row + 1; column < matrix.length; column++) {
+      const result = matrix[row].correlations.get(matrix[column].key);
+      if (result?.r != null) insights.push({ result, a: matrix[row], b: matrix[column] });
+    }
+  }
+  insights.sort((a, b) => Math.abs(b.result.r) - Math.abs(a.result.r));
+  const insightPanel = document.createElement('div');
+  insightPanel.className = 'correlation-insights';
+  const heading = document.createElement('h4');
+  heading.textContent = 'Relaciones más fuertes';
+  const list = document.createElement('ol');
+  for (const { result, a, b } of insights.slice(0, 5)) {
+    const item = document.createElement('li');
+    item.append(document.createTextNode(`${a.shortLabel ?? a.label} ↔ ${b.shortLabel ?? b.label}`));
+    const value = document.createElement('strong');
+    value.textContent = `r ${result.r.toFixed(2)} · n ${result.n}`;
+    item.append(value);
+    list.append(item);
+  }
+  if (!list.childElementCount) {
+    const item = document.createElement('li');
+    item.textContent = 'Todavía no hay suficientes pares medidos y variados.';
+    list.append(item);
+  }
+  insightPanel.append(heading, list);
+  container.append(insightPanel, wrap);
 }
 
 function loadLand() {

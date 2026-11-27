@@ -1,5 +1,5 @@
-import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, weeklyMetrics, trainingHeatmap, personalBests, personalBestHistory, recordDistanceGroups, openWaterRecordDistances, trainingSummary, strokeMix, strokeSummary, sortSessions, filterLogbook, hideShortSessions, metricRating, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory } from './analytics.mjs';
-import { scatterplot, distribution, weeklyChart, heatmap, paceLabel, swolfChart, routeMap, recordPaceChart, recordHistoryChart } from './charts.js';
+import { annotateOutliers, deriveMetrics, divide, localDate, dateKey, weeklyTrend, weeklyMetrics, trainingHeatmap, trainingPatterns, personalBests, personalBestHistory, recordDistanceGroups, openWaterRecordDistances, trainingSummary, strokeMix, strokeSummary, sortSessions, filterLogbook, hideShortSessions, metricRating, oceanmanPlanRows, oceanmanRollingVolumes, oceanmanReadiness, oceanmanReadinessHistory, oceanmanDashboard, correlationMatrix } from './analytics.mjs';
+import { scatterplot, distribution, weeklyChart, heatmap, paceLabel, swolfChart, routeMap, recordPaceChart, recordHistoryChart, sessionMetricChart, categoryBarChart, correlationMatrixChart } from './charts.js';
 import { renderActivity } from './activity.js';
 import { swimmerContext } from './ai-export.mjs';
 
@@ -10,6 +10,7 @@ let demo = false;
 let running = false;
 let visible = [];
 let logbookRows = [];
+let logbookPage = 1;
 let currentPoll = null;
 let tableSort = null;
 let recordGroup = 'freestyle';
@@ -130,6 +131,7 @@ function render() {
   const elapsed = visible.reduce((s, a) => s + (a.elapsedTime ?? 0), 0);
   $('source').textContent = demo ? 'DEMO / SYNTHETIC DATA' : dataset.activities.length ? cloud ? 'CLOUD POSTGRES / GARMIN' : 'LOCAL SQLITE / GARMIN' : 'NO DATA';
   $('source').className = `badge${demo ? ' demo' : ''}`;
+  $('connection').open = dataset.activities.length === 0;
   $('distance').textContent = format(totalDistance / 1000, 2);
   const pool = visible.filter(a => a.type === 'pool').reduce((s, a) => s + (a.distance ?? 0), 0);
   $('distance-note').textContent = `${format(pool / 1000)} km pool / ${format((totalDistance - pool) / 1000)} km open water`;
@@ -148,6 +150,9 @@ function render() {
   renderWeekly(scope.filter(a => (include || !a.excluded) && localDate(a.date) <= to), from, to);
   heatmap($('heatmap'), trainingHeatmap(visible));
   swolfChart($('swolf-chart'), visible);
+  renderPerformanceCharts(visible);
+  renderPerformanceCorrelations(visible);
+  renderTrainingCharts(trainingPatterns(visible));
   renderSummary(trainingSummary(visible), annotated.filter(a => a.type === 'open_water').length);
   renderStrokeSummary(strokeSummary(visible, dataset.lengths));
   renderStrokeMix(strokeMix(visible, dataset.lengths));
@@ -160,6 +165,82 @@ function render() {
   renderWarnings();
   renderOceanman(annotated.filter(a => include || !a.excluded));
   $('export-ai').disabled = visible.length === 0;
+}
+function performanceRows(activities, value) {
+  return activities.map(activity => ({
+    id: activity.id, date: activity.date, name: activity.name, environment: activity.type, value: value(activity),
+  }));
+}
+function renderPerformanceCorrelations(activities) {
+  const definitions = [
+    ['distance', 'Distancia', 'km'], ['movingTime', 'Tiempo en movimiento', 'Mov'], ['elapsedTime', 'Tiempo total', 'Total'],
+    ['timerTime', 'Timer FIT', 'Timer'], ['movingRatio', 'Continuidad', 'Mov%'], ['pace', 'Ritmo', 'Pace'],
+    ['heartRate', 'FC media', 'FC'], ['lengths', 'Largos', 'Largos'], ['strokes', 'Brazadas', 'Braz'],
+    ['spm', 'Brazadas/min', 'SPM'], ['tempo', 'Tempo', 'Tempo'], ['spl', 'Brazadas/largo', 'SPL'],
+    ['dps', 'Distancia/brazada', 'DPS'], ['tpl', 'Tiempo/largo', 'TPL'], ['lpm', 'Largos/min', 'LPM'],
+    ['swolf', 'SWOLF', 'SWOLF'], ['temperature', 'Temperatura media', 'Temp'], ['minTemperature', 'Temperatura mínima', 'MinT'],
+    ['maxTemperature', 'Temperatura máxima', 'MaxT'], ['freestylePct', 'Crol %', 'Crol'], ['breaststrokePct', 'Braza %', 'Braza'],
+    ['backstrokePct', 'Espalda %', 'Esp'], ['butterflyPct', 'Mariposa %', 'Marip'], ['efficiency', 'Swim index', 'Index'],
+  ].map(([key, label, shortLabel]) => ({ key, label, shortLabel }));
+  const rows = activities.map(activity => ({
+    ...activity,
+    efficiency: activity.pace > 0 && activity.dps > 0 ? 100 / activity.pace * activity.dps : null,
+  }));
+  correlationMatrixChart($('performance-correlation-matrix'), correlationMatrix(rows, definitions),
+    'Correlaciones entre todas las métricas de sesión');
+}
+function renderPerformanceCharts(activities) {
+  sessionMetricChart($('pace-trend'), performanceRows(activities, a => a.pace), {
+    label: 'Ritmo', yLabel: 'Ritmo /100 m', format: paceLabel, lowerIsBetter: true, area: true,
+  });
+  sessionMetricChart($('efficiency-trend'), performanceRows(activities, a =>
+    a.pace > 0 && a.dps > 0 ? 100 / a.pace * a.dps : null), {
+    label: 'Swim index', yLabel: 'Swim index', format: value => format(value, 2), color: '#74bdf0',
+  });
+  sessionMetricChart($('dps-trend'), performanceRows(activities, a => a.dps), {
+    label: 'DPS', yLabel: 'Metros / brazada', format: value => format(value, 2), color: '#9eafff',
+  });
+  sessionMetricChart($('hr-trend'), performanceRows(activities, a => a.heartRate), {
+    label: 'Frecuencia cardiaca media', yLabel: 'bpm', format: value => format(value, 0), color: '#ff8b88',
+  });
+  sessionMetricChart($('temperature-trend'), performanceRows(activities, a => a.temperature), {
+    label: 'Temperatura media', yLabel: '°C', format: value => format(value, 1), color: '#f5bc72',
+  });
+  distribution($('duration-hist'), activities.map(a => a.movingTime == null ? null : a.movingTime / 60), false, {
+    label: 'Distribución de minutos en movimiento', xLabel: 'Moving time (minutes)', color: '#74bdf0',
+  });
+  distribution($('moving-ratio-hist'), activities.map(a => a.movingRatio == null ? null : a.movingRatio * 100), false, {
+    label: 'Distribución de la proporción en movimiento', xLabel: 'Moving ratio (%)',
+    format: value => `${format(value, 0)}%`, color: '#f5bc72',
+  });
+}
+function renderTrainingCharts(patterns) {
+  categoryBarChart($('weekday-sessions-chart'), patterns.weekdays.map(row => ({ label: row.label, value: row.sessions })), {
+    label: 'Sesiones por día', yLabel: 'sesiones', format: value => format(value, 0),
+  });
+  categoryBarChart($('weekday-distance-chart'), patterns.weekdays.map(row => ({ label: row.label, value: row.distanceKm })), {
+    label: 'Distancia por día', yLabel: 'km', format: value => format(value, 1), color: '#74bdf0',
+  });
+  categoryBarChart($('hour-sessions-chart'), patterns.hours.filter((row, index) => row.sessions || index >= 5 && index <= 22)
+    .map(row => ({ label: row.label, value: row.sessions })), {
+    label: 'Sesiones por hora', yLabel: 'sesiones', format: value => format(value, 0), maxBars: 24,
+  });
+  categoryBarChart($('hour-distance-chart'), patterns.hours.filter((row, index) => row.distanceKm || index >= 5 && index <= 22)
+    .map(row => ({ label: row.label, value: row.distanceKm })), {
+    label: 'Distancia por hora', yLabel: 'km', format: value => format(value, 1), color: '#74bdf0', maxBars: 24,
+  });
+  categoryBarChart($('month-distance-chart'), patterns.months.map(row => ({ label: row.label, value: row.distanceKm })), {
+    label: 'Distancia mensual', yLabel: 'km', format: value => format(value, 1), color: '#9eafff', maxBars: 18,
+  });
+  categoryBarChart($('month-sessions-chart'), patterns.months.map(row => ({ label: row.label, value: row.sessions })), {
+    label: 'Sesiones mensuales', yLabel: 'sesiones', format: value => format(value, 0), color: '#f5bc72', maxBars: 18,
+  });
+  categoryBarChart($('environment-distance-chart'), patterns.environments.map((row, index) => ({
+    label: row.label, value: row.distanceKm, color: index ? '#9eafff' : '#54dbcb',
+  })), { label: 'Distancia por entorno', yLabel: 'km', format: value => format(value, 1), horizontal: true });
+  categoryBarChart($('pool-length-chart'), patterns.poolLengths.map(row => ({ label: row.label, value: row.distanceKm })), {
+    label: 'Distancia por longitud de piscina', yLabel: 'km', format: value => format(value, 1), horizontal: true,
+  });
 }
 function renderWeekly(scope, from, to) {
   const metric = $('weekly-metric').value;
@@ -366,12 +447,19 @@ function recordAdvancedStats(entry, category, openWater) {
 
 function renderOceanman(activities) {
   const now = new Date();
-  const readiness = oceanmanReadiness(activities, now, dataset.lengths);
+  const windowDays = Number($('readiness-window').value);
+  const dashboard = oceanmanDashboard(activities, now, dataset.lengths, windowDays);
+  const readiness = dashboard.readiness;
   readinessChecks = readiness.checks;
-  readinessHistory = oceanmanReadinessHistory(activities, now, dataset.lengths);
+  readinessHistory = oceanmanReadinessHistory(activities, now, dataset.lengths, windowDays);
+  $('readiness-window-note').textContent =
+    `Activo: ${windowDays} días y ${readiness.weekCount} semanas completas. La tirada OW, continuidad, técnica y especificidad son siempre recientes dentro de este horizonte.`;
   const percentValue = value => value == null ? '--' : `${oceanmanFormat(value, 1)}%`;
+  renderOverviewDashboard(dashboard);
+  $('oceanman-days').textContent = oceanmanFormat(dashboard.race.daysToRace, 0);
+  $('oceanman-cutoff-pace').textContent = `${paceLabel(dashboard.race.cutoffPace)} /100 m`;
   $('readiness-score').textContent = percentValue(readiness.score);
-  $('readiness-passed').textContent = `${readiness.completed} de 6 checks superados`;
+  $('readiness-passed').textContent = `${readiness.completed} de ${readiness.checks.length} checks superados`;
   $('readiness-coverage').textContent = `Cobertura: ${readiness.evidenceWeight}% del índice con datos evaluables`;
 
   const rolling = $('rolling-windows');
@@ -405,11 +493,108 @@ function renderOceanman(activities) {
     card.append(header, total, track, caption);
     rolling.append(card);
   }
+  renderOceanmanSignals(dashboard);
   renderReadinessChecks(readinessChecks);
   renderReadinessTrend(readinessHistory);
   renderOceanmanPlan(oceanmanPlanRows(activities, now), now);
 }
+function oceanmanPriority(dashboard) {
+  if (!dashboard.lastSession) return {
+    title: 'Empieza con datos reales',
+    note: 'Sincroniza Garmin o carga el demo para calcular el siguiente hito.',
+    current: '--', target: 'Primera sesión registrada', progress: 0,
+  };
+  const check = [...dashboard.readiness.checks]
+    .filter(item => !item.complete)
+    .sort((a, b) => b.weight * (100 - (b.progress ?? 0)) - a.weight * (100 - (a.progress ?? 0)))[0];
+  if (!check) return {
+    title: 'Base de evidencia completa',
+    note: 'Los seis checks registrados están superados. Mantén la carga estable y revisa la progresión, no solo el total.',
+    current: `${dashboard.readiness.checks.length} / ${dashboard.readiness.checks.length} checks`, target: 'Mantener y no asumir sobrecarga', progress: 100,
+  };
+  const nextMilestone = check.milestones?.find(item => !item.done)?.label ?? 'Próximo hito';
+  const plans = {
+    'long-session': ['Amplía la tirada larga', 'La distancia máxima reciente es la palanca más rápida para aportar evidencia de resistencia básica.'],
+    'open-water': ['Prioriza una tirada en aguas abiertas', 'La práctica específica en OW pesa más que añadir otro volumen equivalente en piscina.'],
+    'weekly-volume': ['Construye una base semanal', 'El índice mira ocho semanas completas; evita depender de un único pico aislado.'],
+    continuity: ['Mejora la continuidad registrada', 'En sesiones de 1,5 km o más, busca una mayor proporción de tiempo en movimiento, sin confundirlo con nado ininterrumpido.'],
+    consistency: ['Cierra semanas con frecuencia', 'Tres o más sesiones por semana generan una señal de constancia más útil que una semana aislada.'],
+    specificity: ['Aumenta el trabajo en aguas abiertas', 'El volumen total en piscina no sustituye la adaptación al entorno, al neopreno, la orientación y las condiciones de la carrera.'],
+    technique: ['Añade sesiones de crol con FIT completo', 'El modelo necesita largos válidos con recuento de brazadas para medir estabilidad dentro de sesión.'],
+  };
+  const [title, note] = plans[check.id];
+  return { title, note, current: check.display, target: nextMilestone, progress: check.progress ?? 0 };
+}
+function renderOverviewDashboard(dashboard) {
+  const priority = oceanmanPriority(dashboard);
+  const score = dashboard.readiness.score;
+  const scoreText = score == null ? '--' : `${oceanmanFormat(score, 0)}%`;
+  const ring = $('overview-readiness-ring');
+  ring.style.setProperty('--score', String(score ?? 0));
+  ring.classList.toggle('has-score', score != null);
+  $('overview-score').textContent = scoreText;
+  $('overview-confidence').textContent = score == null ? 'Sin datos evaluables'
+    : `${dashboard.readiness.evidenceWeight}% de cobertura`;
+  $('overview-days').textContent = oceanmanFormat(dashboard.race.daysToRace, 0);
+  $('overview-verdict').textContent = score == null
+    ? 'Sincroniza tus actividades o explora el demo para calcular tu estado.'
+    : score >= 85 ? 'Base sólida de evidencias. Mantén la progresión y evita que el volumen o la intensidad se disparen.'
+      : score >= 70 ? 'Preparación en buena dirección; todavía hay hitos con margen de mejora.'
+        : score >= 45 ? 'Base en construcción. La prioridad es cerrar el hito con mayor impacto, no sumar métricas al azar.'
+          : 'La evidencia actual es todavía baja. Empieza por el siguiente hito específico.';
+  $('overview-priority').textContent = priority.title;
+  $('overview-priority-note').textContent = priority.note;
+  $('overview-priority-current').textContent = priority.current;
+  $('overview-priority-target').textContent = priority.target;
+  $('overview-priority-fill').style.width = `${priority.progress}%`;
+
+  $('overview-week').textContent = dashboard.week.targetKm == null ? '--'
+    : `${oceanmanFormat(dashboard.week.actualKm, 1)} / ${oceanmanFormat(dashboard.week.targetKm, 1)} km`;
+  $('overview-week-note').textContent = dashboard.week.targetKm == null ? 'Sin objetivo de semana activa'
+    : `${oceanmanFormat(dashboard.week.remainingKm, 1)} km para completar el objetivo`;
+  $('overview-week-fill').style.width = `${dashboard.week.progress ?? 0}%`;
+  $('overview-load').textContent = `${oceanmanFormat(dashboard.load.last7Km, 1)} km`;
+  $('overview-load-note').textContent = dashboard.load.deltaPercent == null ? 'No hay base anterior comparable'
+    : `${dashboard.load.deltaPercent >= 0 ? '+' : ''}${oceanmanFormat(dashboard.load.deltaPercent, 0)}% vs. 7 días anteriores`;
+  $('overview-acratio').textContent = dashboard.load.ratio == null ? '--' : oceanmanFormat(dashboard.load.ratio, 2);
+  $('overview-acratio-note').textContent = dashboard.load.ratio == null ? 'Necesitas más carga registrada'
+    : dashboard.load.ratio > 1.3 ? 'Pico agudo de carga'
+      : dashboard.load.ratio < 0.8 ? 'Carga reciente por debajo de la base'
+        : 'Carga aguda alineada con la base';
+  $('overview-pace').textContent = paceLabel(dashboard.openWater.pace);
+  $('overview-pace-note').textContent = dashboard.openWater.paceMargin == null
+    ? 'Sin tiradas OW ≥1 km con ritmo válido'
+    : `${Math.abs(Math.round(dashboard.openWater.paceMargin))} s/100 m ${dashboard.openWater.paceMargin >= 0 ? 'por debajo' : 'por encima'} del corte de ${paceLabel(dashboard.openWater.cutoffPace)}`;
+  $('overview-last').textContent = dashboard.lastSession ? `${oceanmanFormat(dashboard.lastSession.distance / 1000, 1)} km` : '--';
+  $('overview-last-note').textContent = dashboard.lastSession
+    ? `${dashboard.lastSession.name} · ${localDate(dashboard.lastSession.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}` : 'Sin sesiones guardadas';
+  $('oceanman-focus-title').textContent = priority.title;
+  $('oceanman-focus-note').textContent = `${priority.note} Estado actual: ${priority.current}; siguiente hito: ${priority.target}.`;
+}
+function renderOceanmanSignals(dashboard) {
+  const signalData = [
+    ['Objetivo semanal', dashboard.week.targetKm == null ? '--' : `${oceanmanFormat(dashboard.week.actualKm, 1)} / ${oceanmanFormat(dashboard.week.targetKm, 1)} km`,
+      `${oceanmanFormat(dashboard.week.remainingKm, 1)} km pendientes · ${dashboard.week.sessions} sesiones`],
+    ['Cambio del índice', dashboard.readinessDelta == null ? '--' : `${dashboard.readinessDelta >= 0 ? '+' : ''}${oceanmanFormat(dashboard.readinessDelta, 1)} pp`,
+      'Comparado con hace 28 días'],
+    ['Agua abierta · 28 días', `${oceanmanFormat(dashboard.load.openWater28Km, 1)} km`,
+      `${oceanmanFormat(dashboard.load.openWaterShare, 0)}% del volumen registrado`],
+    ['Carga A:C', dashboard.load.ratio == null ? '--' : oceanmanFormat(dashboard.load.ratio, 2),
+      '7 días respecto a la media semanal de 28'],
+    ['Tiradas OW evaluables', oceanmanFormat(dashboard.openWater.sessions, 0),
+      `${oceanmanFormat(dashboard.openWater.distanceKm, 1)} km en los últimos 90 días`],
+  ];
+  $('oceanman-signals').replaceChildren(...signalData.map(([label, value, note]) => {
+    const card = document.createElement('article');
+    card.className = 'signal-card';
+    const caption = document.createElement('span'), strong = document.createElement('strong'), small = document.createElement('small');
+    caption.textContent = label; strong.textContent = value; small.textContent = note;
+    card.append(caption, strong, small);
+    return card;
+  }));
+}
 function renderReadinessChecks(checks) {
+  document.querySelector('[data-check-filter="all"]').textContent = `Todos (${checks.length})`;
   const counts = Object.fromEntries(['completed', 'progress', 'pending'].map(state =>
     [state, checks.filter(check => check.status === state).length]));
   for (const [state, count] of Object.entries(counts)) {
@@ -455,11 +640,16 @@ function renderReadinessChecks(checks) {
     const fill = document.createElement('span');
     fill.style.width = `${check.progress ?? 0}%`;
     track.append(fill);
+    const method = document.createElement('details');
+    method.className = 'check-method';
+    const methodToggle = document.createElement('summary');
+    methodToggle.textContent = 'Por qué y cómo se mide';
     const description = document.createElement('p');
     description.textContent = check.description;
     const base = document.createElement('p');
     base.className = 'check-base';
     base.textContent = `Base: ${check.base}`;
+    method.append(methodToggle, description, base);
     const milestones = document.createElement('div');
     milestones.className = 'check-milestones';
     for (const milestone of check.milestones) {
@@ -469,7 +659,7 @@ function renderReadinessChecks(checks) {
       item.textContent = `${milestone.done ? '✓ ' : ''}${milestone.label}`;
       milestones.append(item);
     }
-    card.append(top, value, track, description, base, milestones);
+    card.append(top, value, track, milestones, method);
     container.append(card);
   }
   if (!container.childElementCount) {
@@ -514,6 +704,19 @@ function renderReadinessTrend(history) {
   const title = document.createElementNS(svg.namespaceURI, 'title');
   title.textContent = 'Evolución histórica del porcentaje de preparación Oceanman';
   svg.append(title);
+  const defs = document.createElementNS(svg.namespaceURI, 'defs');
+  const gradient = document.createElementNS(svg.namespaceURI, 'linearGradient');
+  gradient.setAttribute('id', 'readiness-area-gradient');
+  gradient.setAttribute('x1', '0'); gradient.setAttribute('x2', '0'); gradient.setAttribute('y1', '0'); gradient.setAttribute('y2', '1');
+  for (const [offset, opacity] of [['0%', '.28'], ['100%', '0']]) {
+    const stop = document.createElementNS(svg.namespaceURI, 'stop');
+    stop.setAttribute('offset', offset);
+    stop.setAttribute('stop-color', '#54dbcb');
+    stop.setAttribute('stop-opacity', opacity);
+    gradient.append(stop);
+  }
+  defs.append(gradient);
+  svg.append(defs);
   for (const guide of [50, 70, 85]) {
     const line = document.createElementNS(svg.namespaceURI, 'line');
     line.setAttribute('x1', String(left)); line.setAttribute('x2', String(width - right));
@@ -526,10 +729,15 @@ function renderReadinessTrend(history) {
     label.textContent = `${guide}%`;
     svg.append(label);
   }
+  const linePath = points.map((point, index) =>
+    `${index ? 'L' : 'M'}${x(index).toFixed(1)},${y(point.score ?? 0).toFixed(1)}`).join(' ');
+  const area = document.createElementNS(svg.namespaceURI, 'path');
+  area.setAttribute('class', 'readiness-area');
+  area.setAttribute('d', `${linePath} L${x(points.length - 1).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`);
+  svg.append(area);
   const path = document.createElementNS(svg.namespaceURI, 'path');
   path.setAttribute('class', 'readiness-line');
-  path.setAttribute('d', points.map((point, index) =>
-    `${index ? 'L' : 'M'}${x(index).toFixed(1)},${y(point.score ?? 0).toFixed(1)}`).join(' '));
+  path.setAttribute('d', linePath);
   svg.append(path);
   const stride = Math.max(1, Math.ceil(points.length / 80));
   for (let index = 0; index < points.length; index += stride) {
@@ -758,7 +966,13 @@ function setupLogbookDisplay() {
 setupLogbookDisplay();
 
 function renderTable() {
-  $('table-count').textContent = `${logbookRows.length} SESSIONS`;
+  const rows = sortedVisible();
+  const pageSize = $('logbook-page-size').value === 'all' ? Math.max(1, rows.length)
+    : Number($('logbook-page-size').value);
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  logbookPage = Math.min(logbookPage, pages);
+  const pageRows = rows.slice((logbookPage - 1) * pageSize, logbookPage * pageSize);
+  $('table-count').textContent = `${logbookRows.length} sesiones`;
   const shown = columns.map(([title, get], index) => ({ title, get, index }))
     .filter(({ title }) => title === 'Local date' || logbookGroups.some(group => group.shown && group.titles.includes(title)));
   const ranges = new Map();
@@ -782,6 +996,7 @@ function renderTable() {
     button.setAttribute('aria-label', `Sort by ${title}`);
     button.addEventListener('click', () => {
       tableSort = { index, direction: tableSort?.index === index && tableSort.direction === 'ascending' ? 'descending' : 'ascending' };
+      logbookPage = 1;
       renderTable();
       $('table-head').querySelector(`[data-column="${index}"]`).focus();
     });
@@ -790,7 +1005,7 @@ function renderTable() {
   }
   $('table-head').replaceChildren(header);
   const fragment = document.createDocumentFragment();
-  for (const a of sortedVisible()) {
+  for (const a of pageRows) {
     const row = document.createElement('tr');
     if (a.excluded) row.className = 'excluded';
     for (const { title, get, index } of shown) {
@@ -825,9 +1040,93 @@ function renderTable() {
     fragment.append(row);
   }
   $('sessions').replaceChildren(fragment);
+  renderLogbookMobile(pageRows);
+  renderLogbookSummary();
+  $('logbook-prev').disabled = logbookPage <= 1;
+  $('logbook-next').disabled = logbookPage >= pages;
+  $('logbook-page-info').textContent = rows.length
+    ? `Página ${logbookPage} de ${pages} · ${(logbookPage - 1) * pageSize + 1}–${Math.min(logbookPage * pageSize, rows.length)} de ${rows.length}`
+    : 'Sin resultados';
 }
 function sortedVisible() {
-  return tableSort ? sortSessions(logbookRows, sortFields[tableSort.index], tableSort.direction) : logbookRows;
+  return tableSort ? sortSessions(logbookRows, sortFields[tableSort.index], tableSort.direction)
+    : sortSessions(logbookRows, a => localDate(a.date).getTime(), 'descending');
+}
+function renderLogbookSummary() {
+  const container = $('logbook-summary');
+  const distance = logbookRows.reduce((sum, a) => sum + (a.distance ?? 0), 0);
+  const paced = logbookRows.filter(a => positiveForUi(a.distance) && positiveForUi(a.movingTime));
+  const pace = divide(paced.reduce((sum, a) => sum + a.movingTime * 100, 0),
+    paced.reduce((sum, a) => sum + a.distance, 0));
+  const complete = logbookRows.filter(a => a.fitStatus === 'complete').length;
+  const openWater = logbookRows.filter(a => a.type === 'open_water')
+    .reduce((sum, a) => sum + (a.distance ?? 0), 0);
+  const definitions = [
+    ['Sesiones', format(logbookRows.length, 0), `${format(divide(complete * 100, logbookRows.length), 0)}% con FIT completo`],
+    ['Distancia', `${format(distance / 1000, 1)} km`, 'Total del resultado filtrado'],
+    ['Ritmo medio', paceLabel(pace), 'Ponderado por distancia'],
+    ['Aguas abiertas', `${format(openWater / 1000, 1)} km`, `${format(divide(openWater * 100, distance), 0)}% del volumen`],
+    ['Última sesión', logbookRows.length ? [...logbookRows].sort((a, b) => localDate(b.date) - localDate(a.date))[0].date?.slice(0, 10) : '--',
+      'Fecha local más reciente'],
+  ];
+  container.replaceChildren(...definitions.map(([label, value, note]) => {
+    const card = document.createElement('article');
+    const caption = document.createElement('span'), strong = document.createElement('strong'), small = document.createElement('small');
+    caption.textContent = label; strong.textContent = value; small.textContent = note;
+    card.append(caption, strong, small);
+    return card;
+  }));
+}
+function positiveForUi(value) {
+  return Number.isFinite(value) && value > 0;
+}
+function renderLogbookMobile(rows) {
+  const container = $('logbook-mobile');
+  container.replaceChildren();
+  for (const a of rows) {
+    const card = document.createElement('article');
+    card.className = `logbook-session-card${a.excluded ? ' excluded' : ''}`;
+    const header = document.createElement('div');
+    header.className = 'logbook-session-header';
+    const heading = document.createElement('div');
+    const date = document.createElement('a');
+    date.className = 'activity-link';
+    date.href = `#activity=${encodeURIComponent(a.id)}`;
+    date.textContent = a.date?.replace('T', ' ').slice(0, 16) ?? '--';
+    const name = document.createElement('strong');
+    name.textContent = a.name ?? 'Sesión';
+    heading.append(name, date);
+    const tags = document.createElement('div');
+    tags.className = 'session-tags';
+    const environment = document.createElement('span');
+    environment.textContent = a.type === 'open_water' ? 'OW' : `Piscina ${format(a.poolLength, 0)} m`;
+    const fit = document.createElement('span');
+    fit.textContent = a.fitStatus === 'complete' ? 'FIT completo' : 'FIT incompleto';
+    fit.dataset.status = a.fitStatus === 'complete' ? 'complete' : 'warning';
+    tags.append(environment, fit);
+    header.append(heading, tags);
+    const metrics = document.createElement('dl');
+    for (const [label, value] of [
+      ['Distancia', `${format(a.distance / 1000, 2)} km`],
+      ['Ritmo', `${paceLabel(a.pace)} /100 m`],
+      ['En movimiento', time(a.movingTime)],
+      ['Continuidad', percent(a.movingRatio == null ? null : a.movingRatio * 100)],
+      ['DPS', format(a.dps, 2)],
+      ['SWOLF', format(a.swolf, 1)],
+    ]) {
+      const wrap = document.createElement('div'), term = document.createElement('dt'), definition = document.createElement('dd');
+      term.textContent = label; definition.textContent = value;
+      wrap.append(term, definition); metrics.append(wrap);
+    }
+    card.append(header, metrics);
+    container.append(card);
+  }
+  if (!rows.length) {
+    const empty = document.createElement('p');
+    empty.className = 'record-empty';
+    empty.textContent = 'No hay sesiones que coincidan con estos filtros.';
+    container.append(empty);
+  }
 }
 function renderPoolOptions() {
   const select = $('pool-filter');
@@ -852,7 +1151,16 @@ function applyLogbookFilters() {
     || maxDistance != null && (!Number.isFinite(maxDistance) || maxDistance < 0)
     || minDistance != null && maxDistance != null && minDistance > maxDistance;
   $('logbook-filter-error').textContent = invalid ? 'Enter valid non-negative distances; the minimum cannot exceed the maximum.' : '';
-  logbookRows = invalid ? [] : filterLogbook(visible, { minDistance, maxDistance, pool: $('pool-filter').value });
+  const query = $('logbook-search').value.trim().toLocaleLowerCase();
+  const fit = $('fit-filter').value;
+  let filtered = invalid ? [] : filterLogbook(visible, { minDistance, maxDistance, pool: $('pool-filter').value });
+  filtered = filtered.filter(a => (!query || `${a.id} ${a.name} ${a.date}`.toLocaleLowerCase().includes(query))
+    && (fit === 'all' || fit === 'complete' && a.fitStatus === 'complete'
+      || fit === 'incomplete' && a.fitStatus !== 'complete'));
+  const recent = $('recent-filter').value;
+  if (recent !== 'all') filtered = [...filtered].sort((a, b) => localDate(b.date) - localDate(a.date)).slice(0, Number(recent));
+  logbookRows = filtered;
+  logbookPage = 1;
   $('export').disabled = invalid || logbookRows.length === 0;
   renderTable();
 }
@@ -1025,6 +1333,15 @@ for (const tab of tabs) {
     }
   });
 }
+for (const button of document.querySelectorAll('[data-go-tab]')) {
+  button.addEventListener('click', () => {
+    const target = $(button.dataset.goTab);
+    if (target) {
+      activateTab(target);
+      $('tab-oceanman').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+}
 for (const id of ['period', 'environment', 'outliers', 'from', 'to', 'record-limit']) {
   $(id).addEventListener('change', () => {
     const custom = $('period').value === 'custom';
@@ -1033,12 +1350,19 @@ for (const id of ['period', 'environment', 'outliers', 'from', 'to', 'record-lim
     safeRender();
   });
 }
-for (const id of ['distance-min', 'distance-max']) $(id).addEventListener('input', applyLogbookFilters);
-$('pool-filter').addEventListener('change', applyLogbookFilters);
+for (const id of ['distance-min', 'distance-max', 'logbook-search']) $(id).addEventListener('input', applyLogbookFilters);
+for (const id of ['pool-filter', 'fit-filter', 'recent-filter']) $(id).addEventListener('change', applyLogbookFilters);
+$('logbook-page-size').addEventListener('change', () => { logbookPage = 1; renderTable(); });
+$('logbook-prev').addEventListener('click', () => { logbookPage--; renderTable(); });
+$('logbook-next').addEventListener('click', () => { logbookPage++; renderTable(); });
 $('clear-logbook').addEventListener('click', () => {
+  $('logbook-search').value = '';
   $('distance-min').value = '';
   $('distance-max').value = '';
   $('pool-filter').value = 'all';
+  $('fit-filter').value = 'all';
+  $('recent-filter').value = 'all';
+  logbookPage = 1;
   applyLogbookFilters();
 });
 for (const button of document.querySelectorAll('[data-check-filter]')) {
@@ -1059,6 +1383,7 @@ for (const button of document.querySelectorAll('[data-trend-period]')) {
     renderReadinessTrend(readinessHistory);
   });
 }
+$('readiness-window').addEventListener('change', safeRender);
 for (const button of $('record-groups').querySelectorAll('button')) {
   button.addEventListener('click', () => {
     recordGroup = button.dataset.recordGroup;
@@ -1163,7 +1488,7 @@ $('export-ai').addEventListener('click', () => {
       filters: { period: $('period').selectedOptions[0].textContent, from: from ? dateKey(from) : 'sin límite',
         to: dateKey(to), environment: $('environment').selectedOptions[0].textContent, includeExcluded: $('outliers').checked },
       coverage: $('coverage').textContent, demo, asOf: now,
-      readiness: oceanmanReadiness(oceanmanActivities, now, dataset.lengths),
+      readiness: oceanmanReadiness(oceanmanActivities, now, dataset.lengths, Number($('readiness-window').value)),
       rolling: oceanmanRollingVolumes(oceanmanActivities, now),
     });
     const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }));

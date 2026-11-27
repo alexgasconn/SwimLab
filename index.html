@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>GARMIN LAB / Personal analytics</title>
+  <title>SWIMLAB / Preparación Oceanman</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
   <script defer src="/topojson-client.js"></script>
@@ -13,17 +13,17 @@
 <body>
   <main>
     <header>
-      <div><p class="eyebrow">GARMIN CONNECT / PERSONAL ANALYTICS</p><h1>Find your flow.</h1></div>
+      <div><p class="eyebrow">SWIMLAB / GARMIN CONNECT</p><h1>Control de preparación</h1><p class="subtitle">Tu carga, tu técnica y tu camino hacia Oceanman 14K, en una sola vista.</p></div>
       <div class="header-actions"><span class="badge" id="source">NO DATA</span><button id="export-ai" class="secondary" disabled title="Download a private Markdown context to review before sharing with an AI">AI context .md</button><button id="export" class="secondary" disabled>Export CSV</button></div>
     </header>
     <nav class="tabs" role="tablist" aria-label="Swim dashboard tabs">
-      <button id="overview-tab" role="tab" aria-selected="true" aria-controls="tab-overview" tabindex="0">Overview</button>
+      <button id="overview-tab" role="tab" aria-selected="true" aria-controls="tab-overview" tabindex="0">Today</button>
+      <button id="oceanman-tab" role="tab" aria-selected="false" aria-controls="tab-oceanman" tabindex="-1">Oceanman 14K</button>
       <button id="performance-tab" role="tab" aria-selected="false" aria-controls="tab-performance" tabindex="-1">Performance</button>
       <button id="training-tab" role="tab" aria-selected="false" aria-controls="tab-training" tabindex="-1">Training patterns</button>
       <button id="routes-tab" role="tab" aria-selected="false" aria-controls="tab-routes" tabindex="-1">Open-water routes</button>
       <button id="records-tab" role="tab" aria-selected="false" aria-controls="tab-records" tabindex="-1">Personal bests</button>
       <button id="logbook-tab" role="tab" aria-selected="false" aria-controls="tab-logbook" tabindex="-1">Swim logbook</button>
-      <button id="oceanman-tab" role="tab" aria-selected="false" aria-controls="tab-oceanman" tabindex="-1">Oceanman 14K</button>
     </nav>
     <details class="analytics-filters">
       <summary>Analytics filters</summary>
@@ -38,6 +38,43 @@
     <p id="status" role="status" aria-live="polite">Loading saved data...</p>
     <section id="activity-detail" aria-label="Detailed activity analysis" hidden></section>
     <section id="tab-overview" class="tab-panel" role="tabpanel" aria-labelledby="overview-tab">
+    <section class="command-grid" aria-label="Estado de preparación">
+      <article class="command-hero panel">
+        <div class="command-copy">
+          <p class="eyebrow">OCEANMAN · LAGO D'ORTA · 13 JUN 2027</p>
+          <h2>Tu preparación, hoy</h2>
+          <p id="overview-verdict" class="command-verdict">Sincroniza tus actividades o explora el demo para calcular tu estado.</p>
+          <div class="race-facts">
+            <span><b id="overview-days">--</b> días para la prueba</span>
+            <span><b>14 km</b> distancia</span>
+            <span><b>6 h</b> corte</span>
+          </div>
+          <button type="button" class="command-cta" data-go-tab="oceanman-tab">Abrir diagnóstico completo</button>
+        </div>
+        <div class="readiness-ring" id="overview-readiness-ring" role="img" aria-label="Preparación Oceanman">
+          <div><strong id="overview-score">--</strong><span>índice</span></div>
+          <small id="overview-confidence">Sin datos evaluables</small>
+        </div>
+      </article>
+      <article class="priority-card panel">
+        <p class="eyebrow">PRIORIDAD ACTUAL</p>
+        <div class="priority-number" id="overview-priority-number">01</div>
+        <h2 id="overview-priority">Empieza con datos</h2>
+        <p id="overview-priority-note">Necesitas al menos una sesión guardada para obtener una recomendación basada en tu entrenamiento.</p>
+        <div class="priority-progress">
+          <span id="overview-priority-current">--</span>
+          <div class="progress-track"><span id="overview-priority-fill"></span></div>
+          <small id="overview-priority-target">Siguiente hito</small>
+        </div>
+      </article>
+    </section>
+    <section class="signal-grid" aria-label="Métricas clave">
+      <article class="signal-card"><span>Semana actual</span><strong id="overview-week">--</strong><small id="overview-week-note">Objetivo del plan</small><div class="progress-track"><span id="overview-week-fill"></span></div></article>
+      <article class="signal-card"><span>Carga · 7 días</span><strong id="overview-load">--</strong><small id="overview-load-note">vs. semana anterior</small></article>
+      <article class="signal-card"><span>Aguda : crónica</span><strong id="overview-acratio">--</strong><small id="overview-acratio-note">7 días vs. base de 28</small></article>
+      <article class="signal-card"><span>Ritmo OW vs. corte</span><strong id="overview-pace">--</strong><small id="overview-pace-note">Últimos 90 días</small></article>
+      <article class="signal-card"><span>Última sesión</span><strong id="overview-last">--</strong><small id="overview-last-note">Distancia y fecha</small></article>
+    </section>
     <details class="connection panel" id="connection" open>
       <summary>Connect &amp; sync <span>Garmin Personal API</span></summary>
       <form id="connect">
@@ -56,7 +93,7 @@
       <article><span>Sessions</span><strong id="count">--</strong><small id="count-note">in this view</small></article>
     </section>
     <article class="panel stroke-overview">
-      <div class="panel-heading"><div><p class="eyebrow">YOUR STROKE MIX</p><h2>Every length, in perspective.</h2></div><span>FILTERED POOL SESSIONS</span></div>
+    <div class="panel-heading"><div><p class="eyebrow">MIX DE ESTILOS</p><h2>Composición técnica del trabajo</h2></div><span>SESIONES DE PISCINA FILTRADAS</span></div>
       <p class="hint" id="stroke-coverage"></p>
       <div id="stroke-bar" class="stroke-bar" role="img"></div>
       <div id="stroke-mix" class="stroke-mix"></div>
@@ -64,7 +101,7 @@
     </section>
     <section id="tab-performance" class="tab-panel" role="tabpanel" aria-labelledby="performance-tab" hidden>
       <div id="performance">
-      <div class="section-heading"><div><p class="eyebrow">01 / PERFORMANCE</p><h2>The shape of your swimming</h2></div><span class="legend"><i class="teal"></i>Pool <i class="violet"></i>Open water</span></div>
+      <div class="section-heading"><div><p class="eyebrow">01 / PERFORMANCE</p><h2>Rendimiento por distancia y sesión</h2></div><span class="legend"><i class="teal"></i>Pool <i class="violet"></i>Open water</span></div>
       <article class="panel">
         <div class="panel-heading"><h3>Personal best pace by distance</h3>
           <label>Category <select id="record-pace-group">
@@ -75,6 +112,11 @@
         </div>
         <p class="chart-note">Pace of the fastest-time effort at each target distance, not necessarily the fastest pace in open water. Lower is faster. Distances are equally spaced; labels without points have no qualifying effort.</p>
         <div id="record-pace-chart" class="chart record-pace-chart"></div>
+      </article>
+      <article class="panel correlation-panel">
+        <div class="panel-heading"><div><p class="eyebrow">ANÁLISIS CRUZADO</p><h3>Qué métricas se mueven juntas</h3></div><span>PEARSON · N ≥ 5</span></div>
+        <p class="chart-note">Matriz completa de todas las métricas numéricas de sesión. Verde = relación positiva, violeta = negativa; más color = relación más fuerte. Usa datos filtrados y sólo pares medidos. Varias métricas comparten fórmulas matemáticas: una correlación describe asociación, no demuestra causalidad ni qué entrenar.</p>
+        <div id="performance-correlation-matrix" class="correlation-matrix"></div>
       </article>
       <div class="chart-grid">
         <article class="panel"><div class="panel-heading"><h3>Pace vs distance</h3><span>SESSION SCATTER</span></div><p class="chart-note">Each dot is a session. Lower pace = faster swimming.</p><div id="scatter" class="chart"></div></article>
@@ -93,13 +135,31 @@
         <article class="panel"><div class="panel-heading"><h3>Distance distribution</h3><span>SESSION SIZE</span></div><div id="distance-hist" class="chart"></div></article>
         <article class="panel"><div class="panel-heading"><h3>Pace distribution</h3><span>SWIMMING SPEED</span></div><div id="pace-hist" class="chart"></div></article>
         <article class="panel"><div class="panel-heading"><h3>SWOLF over time</h3><span>SESSION AVERAGE</span></div><p class="chart-note">Lower can be more efficient, but compare similar pool lengths and session types.</p><div id="swolf-chart" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Pace over time</h3><span>5-SESSION MEAN</span></div><p class="chart-note">Session pace plus a five-session rolling mean. Lower is faster.</p><div id="pace-trend" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Swim index over time</h3><span>EFFICIENCY</span></div><p class="chart-note">Speed × distance per stroke. Higher indicates more speed per stroke input.</p><div id="efficiency-trend" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>DPS over time</h3><span>POOL TECHNIQUE</span></div><p class="chart-note">Metres per recorded stroke; compare similar sessions and pool lengths.</p><div id="dps-trend" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Heart rate over time</h3><span>SESSION AVERAGE</span></div><p class="chart-note">Session average HR. It is not normalized by effort or used as a health grade.</p><div id="hr-trend" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Moving-time distribution</h3><span>SESSION DURATION</span></div><p class="chart-note">Actual moving minutes, excluding recorded pauses.</p><div id="duration-hist" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Moving ratio distribution</h3><span>CONTINUITY</span></div><p class="chart-note">Moving time / elapsed time. A mix of intervals and rests can lower the ratio.</p><div id="moving-ratio-hist" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Temperature by session</h3><span>RECORDED SENSOR</span></div><p class="chart-note">Only sessions with a recorded average temperature are plotted.</p><div id="temperature-trend" class="chart"></div></article>
       </div>
       </div>
     </section>
     <section id="tab-training" class="tab-panel" role="tabpanel" aria-labelledby="training-tab" hidden>
       <div id="patterns">
-      <div class="section-heading"><div><p class="eyebrow">02 / TRAINING PATTERNS</p><h2>When you show up</h2></div></div>
+      <div class="section-heading"><div><p class="eyebrow">02 / TRAINING PATTERNS</p><h2>Hábitos y distribución del entrenamiento</h2></div></div>
       <article class="panel"><div class="panel-heading"><h3>Weekday x hour</h3><span>LOCAL SESSION START TIME</span></div><p class="chart-note">One count per session start, not time spent swimming. Brighter cells = more sessions.</p><div id="heatmap" class="heatmap"></div></article>
+      <div class="section-heading"><div><p class="eyebrow">HÁBITOS</p><h2>Cuándo y cuánto entrenas</h2></div></div>
+      <div class="chart-grid training-chart-grid">
+        <article class="panel"><div class="panel-heading"><h3>Sesiones por día</h3><span>FRECUENCIA</span></div><div id="weekday-sessions-chart" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Distancia por día</h3><span>VOLUMEN</span></div><div id="weekday-distance-chart" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Hora de inicio</h3><span>SESIONES</span></div><div id="hour-sessions-chart" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Volumen por hora</h3><span>DISTANCIA</span></div><div id="hour-distance-chart" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Evolución mensual</h3><span>DISTANCIA</span></div><div id="month-distance-chart" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Sesiones mensuales</h3><span>FRECUENCIA</span></div><div id="month-sessions-chart" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Mezcla piscina / OW</h3><span>KM</span></div><div id="environment-distance-chart" class="chart"></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Volumen por piscina</h3><span>POOL LENGTH</span></div><div id="pool-length-chart" class="chart"></div></article>
+      </div>
       <div class="section-heading"><div><p class="eyebrow">POOL / OPEN WATER</p><h2>Training by environment</h2></div></div>
       <p class="hint">Averages use available sessions; pace is weighted by distance. Pool-length metrics are not applicable to open water. Missing data is shown as --.</p>
       <div id="environment-summary" class="summary-grid"></div>
@@ -109,14 +169,14 @@
       </div>
     </section>
     <section id="tab-routes" class="tab-panel" role="tabpanel" aria-labelledby="routes-tab" hidden>
-      <div class="section-heading"><div><p class="eyebrow">04 / OPEN WATER</p><h2>Your routes</h2></div><span class="badge">OFFLINE BASEMAP</span></div>
+      <div class="section-heading"><div><p class="eyebrow">04 / OPEN WATER</p><h2>Rutas de aguas abiertas</h2></div><span class="badge">OFFLINE BASEMAP</span></div>
       <p class="hint">All recorded GPS routes in the current view are shown together, with start and finish marked. The offline Natural Earth basemap shows approximate coastlines, without streets or local detail; no route coordinates are sent to map services. FIT exports without GPS points cannot be drawn.</p>
       <p id="route-count" class="hint"></p>
       <article class="panel route-panel"><div id="route-map" class="route-map"></div></article>
       <p class="hint">Map data: Natural Earth / <a class="text-link" href="/world-atlas-license.txt">World Atlas license</a> / <a class="text-link" href="/topojson-license.txt">TopoJSON license</a>. Not suitable for navigation.</p>
     </section>
     <section id="tab-records" class="tab-panel" role="tabpanel" aria-labelledby="records-tab" hidden>
-      <div class="section-heading"><div><p class="eyebrow">05 / PERSONAL BESTS</p><h2>Your podium, not predictions</h2></div>
+      <div class="section-heading"><div><p class="eyebrow">05 / PERSONAL BESTS</p><h2>Récords medidos, no estimaciones</h2></div>
         <div class="record-controls"><label>Top<select id="record-limit"><option value="3">3</option><option value="5">5</option><option value="10">10</option></select></label></div>
       </div>
       <div class="records-heading"><div><p class="eyebrow">EXPLORE YOUR EFFORTS</p><h2>Choose your category.</h2></div></div>
@@ -132,16 +192,21 @@
       <div id="record-cards"></div>
     </section>
     <section id="tab-logbook" class="tab-panel" role="tabpanel" aria-labelledby="logbook-tab" hidden>
-      <div class="section-heading"><div><p class="eyebrow">04 / SWIM LOGBOOK</p><h2>Every metric. One place.</h2></div><span id="table-count" class="badge">0 SESSIONS</span></div>
-      <p class="hint">Click a column heading to sort. SPM = strokes / moving minutes; tempo = 60 / SPM in seconds per recorded stroke. Garmin's stroke-count convention is retained, with no assumed doubling; tempo is a same-arm cycle only if the device counts it that way. SPL = strokes / active lengths. DPS = metres / stroke. TPL = moving seconds / length. LPM = active lengths / moving minutes. Stroke percentages use all recorded active-length distance, including unclassified lengths. Missing metrics are shown as --, never zero-filled.</p>
+      <div class="section-heading"><div><p class="eyebrow">04 / SWIM LOGBOOK</p><h2>Consulta y compara tus sesiones</h2></div><span id="table-count" class="badge">0 SESSIONS</span></div>
+      <p class="hint">Busca por nombre o fecha, filtra el tipo de sesión y ordena cualquier métrica. Los filtros locales también afectan al CSV; los colores son comparaciones relativas, no notas absolutas.</p>
+      <div id="logbook-summary" class="logbook-summary" aria-label="Resumen del logbook filtrado"></div>
       <div class="logbook-filters panel" aria-label="Logbook filters">
-        <label>Minimum distance (m)<input id="distance-min" type="number" min="0" step="any" placeholder="No minimum"></label>
-        <label>Maximum distance (m)<input id="distance-max" type="number" min="0" step="any" placeholder="No maximum"></label>
-        <label>Pool length (m)<select id="pool-filter"><option value="all">All environments</option><option value="open_water">Open water</option><option value="unknown">Pool length unknown</option></select></label>
-        <button type="button" class="secondary" id="clear-logbook">Clear logbook filters</button>
+        <label class="logbook-search">Buscar<input id="logbook-search" type="search" placeholder="Nombre, fecha o ID" autocomplete="off"></label>
+        <label>Distancia mínima (m)<input id="distance-min" type="number" min="0" step="any" placeholder="Sin mínimo"></label>
+        <label>Distancia máxima (m)<input id="distance-max" type="number" min="0" step="any" placeholder="Sin máximo"></label>
+        <label>Entorno / piscina<select id="pool-filter"><option value="all">Todos</option><option value="open_water">Aguas abiertas</option><option value="unknown">Piscina desconocida</option></select></label>
+        <label>Importación FIT<select id="fit-filter"><option value="all">Todas</option><option value="complete">FIT completo</option><option value="incomplete">Con incidencias</option></select></label>
+        <label>Mostrar<select id="recent-filter"><option value="all">Todo el alcance global</option><option value="10">10 sesiones más recientes</option><option value="25">25 sesiones más recientes</option><option value="50">50 sesiones más recientes</option></select></label>
+        <label>Por página<select id="logbook-page-size"><option value="10">10</option><option value="25" selected>25</option><option value="50">50</option><option value="all">Todas</option></select></label>
+        <button type="button" class="secondary" id="clear-logbook">Limpiar filtros</button>
       </div>
       <p id="logbook-filter-error" class="filter-error" role="status" aria-live="polite"></p>
-      <p class="hint">These filters affect the logbook and CSV export, not the dashboard charts.</p>
+      <p class="hint">Haz clic en una cabecera para ordenar. La fecha abre el análisis completo de la sesión. En móvil verás tarjetas optimizadas; el CSV sigue incluyendo todos los resultados filtrados.</p>
       <div class="panel logbook-display">
         <fieldset id="logbook-groups"><legend>Column groups</legend></fieldset>
         <label class="logbook-color-toggle"><input id="logbook-colors" type="checkbox" aria-describedby="logbook-color-help"> Conditional colors</label>
@@ -152,31 +217,54 @@
           <div id="logbook-color-targets"></div>
         </details>
       </div>
-      <div class="panel table-panel"><div class="table-wrap" tabindex="0" aria-label="Scrollable swim metrics"><table><thead id="table-head"></thead><tbody id="sessions"></tbody></table></div></div>
+      <div class="panel table-panel"><div class="table-wrap" tabindex="0" aria-label="Métricas desplazables"><table><thead id="table-head"></thead><tbody id="sessions"></tbody></table></div></div>
+      <div id="logbook-mobile" class="logbook-mobile" aria-label="Sesiones en formato móvil"></div>
+      <nav id="logbook-pagination" class="logbook-pagination" aria-label="Paginación del logbook">
+        <button type="button" class="secondary" id="logbook-prev">Anterior</button>
+        <span id="logbook-page-info">Página 1 de 1</span>
+        <button type="button" class="secondary" id="logbook-next">Siguiente</button>
+      </nav>
       <details class="panel review-panel"><summary>Data quality &amp; exclusions <span id="quality-count"></span></summary><p class="hint">Conservative physical limits and robust pace deviations flag sessions, not delete them. Unusual does not mean wrong: technique drills and long rests may be legitimate. Include / exclude decisions are saved locally. Invalid FIT lengths never qualify for records.</p><div id="quality"></div></details>
       <details class="panel review-panel"><summary>Import coverage &amp; warnings <span id="import-count"></span></summary><div id="import-warnings" class="hint"></div></details>
     </section>
     <section id="tab-oceanman" class="tab-panel" role="tabpanel" aria-labelledby="oceanman-tab" hidden>
       <div class="oceanman-hero panel">
         <div><p class="eyebrow">OBJETIVO / 13 JUN 2027</p><h2>OCEANMAN · Lago d'Orta 14K</h2>
-          <p>Seguimiento de tu plan semanal y preparación para una travesía de 14 km. Corte oficial de referencia: 6 horas.</p></div>
+          <p>14 km en 6 horas. El diagnóstico combina distancia, volumen, continuidad, constancia, especificidad OW y estabilidad técnica.</p>
+          <div class="race-facts"><span><b id="oceanman-days">--</b> días restantes</span><span>Ritmo de corte <b id="oceanman-cutoff-pace">2:34 /100 m</b></span></div></div>
         <div class="readiness-total"><span>PREPARACIÓN</span><strong id="readiness-score">--</strong>
-          <small id="readiness-passed">0 de 6 checks superados</small><small id="readiness-coverage"></small></div>
+          <small id="readiness-passed">0 de 7 checks superados</small><small id="readiness-coverage"></small></div>
       </div>
-      <p class="hint">Se analiza todo el historial guardado, respetando el interruptor global de sesiones excluidas. Las estimaciones dependen de la calidad y cantidad de datos; no son una predicción ni consejo médico.</p>
+      <div class="oceanman-model-controls panel">
+        <label>Vigencia de los checks
+          <select id="readiness-window" aria-describedby="readiness-window-note">
+            <option value="28">Últimos 28 días · 4 semanas</option>
+            <option value="56" selected>Últimos 56 días · 8 semanas</option>
+            <option value="90">Últimos 90 días</option>
+            <option value="180">Últimos 180 días</option>
+          </select>
+        </label>
+        <p id="readiness-window-note">Todas las evidencias se recalculan dentro de esta ventana; una gran tirada antigua queda fuera.</p>
+      </div>
+      <p class="hint">Se analiza todo el historial guardado sólo para recalcular el horizonte elegido, respetando sesiones excluidas. No es una predicción ni consejo médico.</p>
+      <div class="focus-strip panel">
+        <div><p class="eyebrow">SIGUIENTE DECISIÓN</p><h3 id="oceanman-focus-title">Falta evidencia de entrenamiento</h3></div>
+        <p id="oceanman-focus-note">Sincroniza Garmin para priorizar el siguiente hito.</p>
+      </div>
+      <div id="oceanman-signals" class="signal-grid oceanman-signals" aria-label="Señales Oceanman"></div>
       <div class="oceanman-section">
-        <div class="section-heading"><div><p class="eyebrow">CARGA RECIENTE</p><h2>Ventanas rodantes de volumen</h2></div></div>
-        <p class="hint">Distancia nadada en los últimos días naturales, comparada con tus objetivos de carga.</p>
+        <div class="section-heading"><div><p class="eyebrow">CARGA RECIENTE</p><h2>Volumen acumulado</h2></div></div>
+        <p class="hint">Ventanas de carga para detectar acumulación, falta de base o picos antes de revisar el plan semanal.</p>
         <div id="rolling-windows" class="rolling-grid"></div>
       </div>
       <div class="oceanman-section">
         <div class="section-heading"><div><p class="eyebrow">PREPARACIÓN / CHECKS</p><h2>Checks Oceanman 14K</h2></div></div>
-        <p class="hint">Índice Garmin v3: tirada larga 15%, resistencia en aguas abiertas 25%, volumen 25%, continuidad de sesión 15%, constancia 10% y estabilidad del crol en sesión 10%. Mínimo de movimiento/total: 70% para tirada larga y resistencia OW; continuidad se completa con una mediana ≥70%. Admite sesiones de series, sin afirmar nado continuo. Tirada larga, resistencia, continuidad y técnica usan los últimos 90 días; volumen y constancia, 8 semanas completas. Los datos insuficientes no suman puntos ni se redistribuyen. Es un índice de evidencias, no una probabilidad de terminar ni una predicción del tiempo de carrera.</p>
+        <p class="hint">El índice no redistribuye pesos cuando faltan datos. Abre “Por qué y cómo se mide” en cada check para ver el criterio.</p>
         <div class="check-filters" aria-label="Filtrar checks">
-          <button type="button" data-check-filter="all" aria-pressed="true">Todos (6)</button>
+          <button type="button" data-check-filter="all" aria-pressed="true">Todos (7)</button>
           <button type="button" data-check-filter="completed" aria-pressed="false">Superados (0)</button>
           <button type="button" data-check-filter="progress" aria-pressed="false">En progreso (0)</button>
-          <button type="button" data-check-filter="pending" aria-pressed="false">Pendientes (6)</button>
+          <button type="button" data-check-filter="pending" aria-pressed="false">Pendientes (7)</button>
         </div>
         <div id="readiness-checks" class="readiness-checks"></div>
       </div>
@@ -188,21 +276,26 @@
             <button type="button" data-trend-period="month" aria-pressed="false">Mensual</button>
           </div>
         </div>
-        <p class="hint">El modelo Garmin v3 se recalcula para cada fecha sin usar sesiones posteriores; sustituye la antigua proyección y los requisitos de bloques continuos. Las líneas de 50%, 70% y 85% son referencias visuales, no niveles clínicos de aptitud.</p>
+        <p class="hint">El modelo Garmin v4 se recalcula para cada fecha sin usar sesiones posteriores. La nueva especificidad OW penaliza una preparación dominada por piscina. Las líneas de 50%, 70% y 85% son referencias visuales, no niveles clínicos de aptitud.</p>
         <article class="panel trend-panel"><div id="readiness-trend" class="readiness-trend"></div></article>
       </div>
       <div class="oceanman-section">
         <div class="section-heading"><div><p class="eyebrow">PLAN / 35 SEMANAS</p><h2>Objetivo y volumen real</h2></div>
           <span id="plan-progress" class="badge">0 / 35 semanas</span></div>
-        <p class="hint">Los objetivos originales están en metros; se muestran en km. Diff = real − objetivo semanal. min/avg/max son distancias por sesión y OW es la distancia en aguas abiertas. Azul más intenso = mayor distancia diaria, con una escala común para todas las semanas. Cero y días futuros no se colorean.</p>
-        <p id="plan-color-scale" class="hint"></p>
-        <div class="panel table-panel"><div class="table-wrap oceanman-plan-wrap" tabindex="0" aria-label="Tabla semanal del plan Oceanman">
-          <table class="oceanman-plan-table"><thead id="oceanman-plan-head"></thead><tbody id="oceanman-plan-body"></tbody></table>
-        </div></div>
+        <p class="hint">Usa las señales de arriba para decidir; la matriz completa queda disponible cuando necesites revisar sesiones día a día.</p>
+        <details class="panel plan-disclosure">
+          <summary>Ver plan semanal completo <span>35 semanas · objetivo, real, diferencia y OW</span></summary>
+          <p class="hint">Diff = real − objetivo semanal. min/avg/max son distancias por sesión y OW es la distancia en aguas abiertas. Azul más intenso = mayor distancia diaria, con una escala común. Cero y días futuros no se colorean.</p>
+          <p id="plan-color-scale" class="hint"></p>
+          <div class="table-panel"><div class="table-wrap oceanman-plan-wrap" tabindex="0" aria-label="Tabla semanal del plan Oceanman">
+            <table class="oceanman-plan-table"><thead id="oceanman-plan-head"></thead><tbody id="oceanman-plan-body"></tbody></table>
+          </div></div>
+        </details>
       </div>
       <div class="oceanman-section">
         <div class="section-heading"><div><p class="eyebrow">REFERENCIA DE TEMPORADA</p><h2>Lago d'Orta · junio</h2></div><span class="badge">MEDIAS 2021–2026</span></div>
-        <p class="hint">Valores orientativos compartidos para la planificación, no una previsión meteorológica ni las condiciones oficiales de carrera. Confirma la seguridad y las condiciones reales cerca del evento.</p>
+        <details class="panel lake-disclosure"><summary>Ver condiciones orientativas <span>agua, aire, viento, oleaje, visibilidad y UV</span></summary>
+        <p class="hint">Valores orientativos para planificación, no una previsión meteorológica ni las condiciones oficiales de carrera. Confirma la seguridad y las condiciones reales cerca del evento.</p>
         <div class="summary-grid lake-reference">
           <article class="summary-card"><h3>Temperatura del agua</h3><strong>18,5–20,5 °C</strong><small>Agua dulce de origen glaciar; termoclina orientativa a partir de 4–5 m.</small></article>
           <article class="summary-card"><h3>Temperatura ambiente</h3><strong>22–28 °C</strong><small>Mañana en Omegna y máximo térmico hacia Lido di Gozzano.</small></article>
@@ -211,6 +304,7 @@
           <article class="summary-card"><h3>Visibilidad</h3><strong>4–6 m</strong><small>Visibilidad nítida orientativa, sujeta al estado real del lago.</small></article>
           <article class="summary-card"><h3>Radiación UV</h3><strong>Índice 7–8</strong><small>Mayor insolación aproximada 11:30–14:30; protege piel y ojos.</small></article>
         </div>
+        </details>
       </div>
     </section>
     <footer id="privacy-note">SWIMLAB / Independent personal dashboard, not affiliated with Garmin. Local, unencrypted health and optional GPS route data: protect this computer and its backups. Never expose this server to the Internet.</footer>

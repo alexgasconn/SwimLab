@@ -24,7 +24,10 @@ Sessions with a recorded distance below 500 m are hidden throughout the app,
 including records and Oceanman, without deleting stored activities. Sessions
 with an unknown distance remain available for data-quality review.
 
-- Separate Overview, Performance, Training patterns, Open-water routes, Personal bests,
+- The **Today** command center opens with the Oceanman readiness index, race countdown,
+  current-week plan progress, 7-day load, acute:chronic load, recent open-water pace
+  versus the 6-hour cutoff and the highest-impact next training evidence.
+- Separate Today, Oceanman, Performance, Training patterns, Open-water routes, Personal bests,
   Swim logbook and Oceanman 14K tabs.
 - Timeframe, environment and excluded-session controls are in the collapsible
   filter section above the dashboard. CSV export remains in the header.
@@ -38,6 +41,17 @@ with an unknown distance remain available for data-quality review.
   omitted. Nothing is sent to an AI service: review the personal and health data
   before choosing whether to share the downloaded file.
 - Moving pace vs distance scatterplot; pace and distance histograms.
+- Performance expands the session history into 13 linked charts: personal-best pace
+  by distance, pace/distance scatter, weekly trends, distance/pace distributions,
+  SWOLF, pace, swim index, DPS, HR and temperature trends, plus moving-time and
+  moving-ratio distributions. Rolling means and point tooltips make trends easier
+  to distinguish from individual-session noise.
+- Performance also includes a full, scrollable Pearson correlation matrix across
+  every meaningful numeric session metric, with sample counts and the five
+  strongest relationships.
+- Training patterns adds weekday/hour heatmaps and charts for weekday frequency,
+  weekday volume, start-hour frequency, start-hour volume, monthly distance and
+  sessions, environment mix, and pool-length volume.
 - Session SWOLF trend and pool / open-water summaries, including counts, session
   share, distance, pace, moving time, heart rate and available technique averages,
   plus pool-length breakdowns. Pace is distance-weighted; other averages use
@@ -86,6 +100,10 @@ with an unknown distance remain available for data-quality review.
   detail, is not suitable for navigation and loads no external map tiles.
 - Full metric logbook with sortable columns and distance / pool-length filters;
   FIT status, exclusion flags and review controls remain outside the table.
+  The logbook also includes a filtered summary, text search, FIT-status and
+  recent-session filters, pagination, a sticky date column and optimized mobile
+  cards. Summary and CSV values use the complete filtered result, not only the
+  visible page.
   These filters also apply to CSV export, but not the other dashboard views.
   Date links open activity detail; ID, activity name and weekday are omitted
   from the table. Toggle Session, Times, Stroke, Sensors and Stroke mix column
@@ -104,18 +122,28 @@ with an unknown distance remain available for data-quality review.
   Reversible per-session review and import warnings remain available.
 - Oceanman tab with the supplied 35-week plan, weekday distance, swim-distance
   summaries, four rolling-volume targets, weighted readiness checks and daily /
-  weekly / monthly readiness history. It analyzes the full saved history and
+  weekly / monthly readiness history. The first screen prioritizes the next check,
+  28-day score change, current weekly target, 28-day open-water share, load ratio
+  and evaluable OW sessions. The full 35-week matrix and seasonal reference are
+  collapsed until needed. It analyzes the full saved history and
   respects the global excluded-session toggle; plan weekly volumes are shown in km.
   Daily distance cells share a blue heat scale across all 35 weeks; zero and
   future values are uncolored. The cumulative-deficit column is no longer used.
-- Oceanman **Garmin v3** is a training-evidence index, not medical advice, a validated
-  physiological model or a probability of finishing. Weights: long session 15%,
-  recent open-water endurance 25%, weekly volume 25%, continuity 15%,
-  consistency 10%, FIT technical stability 10%. Missing evidence adds no points
+- Oceanman **Garmin v4** is a training-evidence index, not medical advice, a validated
+  physiological model or a probability of finishing. Weights: long session 10%,
+  recent open-water endurance 25%, weekly volume 20%, continuity 5%,
+  consistency 5%, open-water specificity 30% and FIT technical stability 5%.
+  The 8-week OW share prevents a large pool-only volume or a single long OW
+  session from inflating race specificity. Missing evidence adds no points
   and its weight is not redistributed; the evaluable weight is shown separately.
   The Lago d'Orta June climate panel is a static reference supplied for planning,
   not live or official race-condition data.
 - Demo data is explicitly synthetic and never written to SQLite.
+
+The Oceanman race pace reference is the arithmetic cutoff pace for 14 km in
+6 hours (2:34/100 m). A margin below that pace is descriptive session evidence,
+not a race-time prediction or a substitute for navigation, conditions, nutrition
+or uninterrupted endurance.
 
 ## Activity lab
 
@@ -125,7 +153,9 @@ copied and reloaded; Back returns to the previous dashboard tab and its filters.
 The detail page shows the selected activity even if it is excluded from analytics.
 
 Four internal tabs keep the analysis readable:
-- Overview: session totals, stroke distance shares and a timestamped length/rest ribbon.
+- Overview: an executive readout for continuity, FIT coverage, longest block and
+  pace versus comparable sessions, followed by totals, stroke distance shares and
+  a timestamped length/rest ribbon.
 - Sets & lengths: a chronological, expandable list of detected sets and recorded rests.
   Active lengths stay in the same set until a recorded rest, even across stroke changes
   or timing anomalies; unrecorded gaps within a set are shown when expanded. Sets show DPS, SPM, tempo and mean SWOLF
@@ -135,7 +165,10 @@ Four internal tabs keep the analysis readable:
   a detailed table including duration, timer, DPS, SPM, tempo, LPM, SWOLF and aligned HR.
 - Technique & trends: per-stroke/pool-length charts, first/last-quarter medians
   (minimum eight measured lengths), and descriptive Pearson correlations
-  (minimum five varying pairs). Shared metric formulas are not evidence of causation.
+  (minimum five varying pairs). Every technique chart explains direction and
+  includes a five-length rolling mean; a full length-metric correlation matrix
+  highlights the strongest relationships. Shared metric formulas are not evidence
+  of causation.
 - HR & GPS: actual FIT HR samples, recording gaps, sample statistics, optional
   device temperature and open-water route, recorded speed/pace and distance.
 
@@ -210,10 +243,11 @@ Whole-session records and rankings highlight elapsed time and show moving pace
 separately when available. The ranking criteria are unchanged.
 When lengths are unavailable, the dashboard says so instead of displaying a fake record.
 
-## Oceanman Garmin v3
+## Oceanman Garmin v4
 
-Long session, endurance, continuity and technique use the preceding 90 calendar days;
-volume and consistency use the last eight **complete Monday-Sunday weeks**, with
+Long session, endurance, continuity and technique use the selected 28, 56, 90 or
+180-day horizon (56 by default). Volume, consistency and specificity use the complete Monday-Sunday
+weeks inside that chosen horizon, with
 unrecorded weeks counting as zero. The final targets remain 20 km/week and 10 km
 open water, not the current phase's weekly plan target. History is recomputed with
 this model at each saved session date and today, using no later sessions; timestamps
@@ -238,6 +272,10 @@ on the chart use a real date scale. History is not a record of past model versio
   the recorded pool length, and positive strokes; invalid lengths are omitted.
   This describes session stability, not continuous fatigue; workout intensity,
   warm-up, drills, wall push-offs and rests can change the result.
+- Open-water specificity is the share of total distance recorded in OW across the
+  last eight complete weeks, independent from maximum OW distance and total volume.
+  Progress reaches 100% at 35% OW; zero recorded OW evaluates as zero rather than
+  missing evidence when another swimming volume exists.
   Pace slowdown and DPS loss must each be <=5%; the worse deterioration drives
   progress from 100% at <=5% to zero at >=15%. These are explicit heuristic
   tolerances, not physiological thresholds. DPS, SPL, LPM and SWOLF are displayed
